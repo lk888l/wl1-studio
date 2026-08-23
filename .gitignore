@@ -1,0 +1,39 @@
+# 前端依赖与构建结果
+node_modules/
+dist/
+.vite/
+.pnpm-store/
+.npm-cache/
+.tools/
+
+# Tauri / Rust 构建结果
+src-tauri/target/
+src-tauri/gen/schemas/
+target/
+*.pdb
+*.dSYM/
+
+# 本地环境与日志
+.env
+.env.*
+!.env.example
+*.local
+*.log
+logs/
+captures/
+
+# 测试与覆盖率
+coverage/
+
+# 编辑器与操作系统
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 临时文件
+*.tmp
+*.swp
+*~
