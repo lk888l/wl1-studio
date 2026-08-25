@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalibrationPage } from "./components/pages/CalibrationPage";
 import { ControlPage } from "./components/pages/ControlPage";
 import { DiagnosticsPage } from "./components/pages/DiagnosticsPage";
+import { KinematicsPage } from "./components/pages/KinematicsPage";
 import { OverviewPage } from "./components/pages/OverviewPage";
 import { PersonalizationPage } from "./components/pages/PersonalizationPage";
 import { TuningPage } from "./components/pages/TuningPage";
@@ -45,6 +46,7 @@ import type {
 
 const pageMeta: Record<PageId, { label: string; eyebrow: string }> = {
   overview: { label: "总览", eyebrow: "Overview" },
+  kinematics: { label: "腿部运动学", eyebrow: "Kinematics" },
   tuning: { label: "参数调校", eyebrow: "Tuning" },
   control: { label: "实时控制", eyebrow: "Control" },
   calibration: { label: "标定向导", eyebrow: "Calibration" },
@@ -479,6 +481,7 @@ export default function App() {
 
         <main className="page-content">
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
+          {page === "kinematics" && <KinematicsPage />}
           {page === "tuning" && <TuningPage connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => setDraftParameters(mergeKnownParameterValues(appliedParameters))} />}
           {page === "control" && <ControlPage key={`${activeSessionId ?? "disconnected"}-${connectionOpen || parameterSending ? "suspended" : "ready"}`} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionOpen || connectionBusy || parameterSending || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
           {page === "calibration" && <CalibrationPage connected={connected} writesUnlocked={writesUnlocked} samples={imuFresh ? samples : []} onSendText={sendText} />}
