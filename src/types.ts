@@ -1,5 +1,6 @@
 export type PageId =
   | "overview"
+  | "kinematics"
   | "tuning"
   | "control"
   | "calibration"

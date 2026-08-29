@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
+  GitFork,
   Gauge,
   Radio,
   SlidersHorizontal,
@@ -13,6 +14,7 @@ import type { ConnectionSnapshot, PageId } from "../types";
 
 const navigation: Array<{ id: PageId; label: string; eyebrow: string; icon: LucideIcon }> = [
   { id: "overview", label: "总览", eyebrow: "Overview", icon: Activity },
+  { id: "kinematics", label: "腿部运动学", eyebrow: "Kinematics", icon: GitFork },
   { id: "tuning", label: "参数调校", eyebrow: "Tuning", icon: SlidersHorizontal },
   { id: "control", label: "实时控制", eyebrow: "Control", icon: Radio },
   { id: "calibration", label: "标定向导", eyebrow: "Calibration", icon: WandSparkles },
