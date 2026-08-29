@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeft,
   Bell,
   Cable,
   ChevronRight,
@@ -15,6 +16,7 @@ import { OverviewPage } from "./components/pages/OverviewPage";
 import { PersonalizationPage } from "./components/pages/PersonalizationPage";
 import { TuningPage } from "./components/pages/TuningPage";
 import { ConnectionModal } from "./components/ConnectionModal";
+import { ProductHome } from "./components/ProductHome";
 import { Sidebar } from "./components/Sidebar";
 import {
   buildParameterCommand,
@@ -117,7 +119,61 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
   return next;
 }
 
+type AppView = "products" | "wl1";
+type CatalogSafetyState = "checking" | "ready" | "error";
+
+interface Wl1StudioProps {
+  onBack: () => void;
+}
+
 export default function App() {
+  const [view, setView] = useState<AppView>("products");
+  const [catalogSafety, setCatalogSafety] = useState<CatalogSafetyState>("checking");
+  const [catalogSafetyError, setCatalogSafetyError] = useState<string | null>(null);
+  const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCatalogSafety("checking");
+    setCatalogSafetyError(null);
+    void deviceGateway.initialize()
+      .then(() => {
+        if (!cancelled) setCatalogSafety("ready");
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        const message = reason instanceof Error ? reason.message : String(reason);
+        setCatalogSafetyError(message);
+        setCatalogSafety("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogSafetyAttempt]);
+
+  useEffect(() => {
+    document.title = view === "products"
+      ? "设备控制中心 · 选择产品"
+      : "WL1 Studio · 轮腿控制中心";
+  }, [view]);
+
+  if (view === "products") {
+    return (
+      <ProductHome
+        safetyState={catalogSafety}
+        safetyError={catalogSafetyError}
+        onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
+        onOpenWl1={() => {
+          if (catalogSafety === "ready") setView("wl1");
+        }}
+      />
+    );
+  }
+
+  return <Wl1Studio onBack={() => setView("products")} />;
+}
+
+function Wl1Studio({ onBack }: Wl1StudioProps) {
   const [page, setPage] = useState<PageId>("overview");
   const [connection, setConnection] = useState<ConnectionSnapshot>(deviceGateway.connection);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -453,6 +509,26 @@ export default function App() {
     setPage(next);
   }, [page]);
 
+  const returnToProductHome = useCallback((): void => {
+    if (connectionBusy) {
+      setConnectionError("当前设备操作尚未完成，请等待操作结束后再返回产品首页。");
+      setConnectionOpen(true);
+      return;
+    }
+    if (connected) {
+      setConnectionError("切换产品前请先断开当前设备，避免设备会话在后台继续运行。");
+      setConnectionOpen(true);
+      return;
+    }
+    if (!startupReady) {
+      setConnectionError("启动安全检查完成前不能离开当前工作台，请先完成安全清理。");
+      setConnectionOpen(true);
+      return;
+    }
+    parameterOperation.current += 1;
+    onBack();
+  }, [connected, connectionBusy, onBack, startupReady]);
+
   const currentMeta = pageMeta[page];
   return (
     <div className="app-shell" {...shellAttributes}>
@@ -460,7 +536,18 @@ export default function App() {
       <Sidebar page={page} robotName={personalization.robotName} connection={connection} onPageChange={navigate} onConnectionOpen={openConnection} />
       <div className="workspace">
         <header className="topbar glass-panel">
-          <div className="breadcrumbs"><span>WL1 Studio</span><ChevronRight size={14} /><strong>{currentMeta.label}</strong><small>{currentMeta.eyebrow}</small></div>
+          <div className="topbar-context">
+            <button
+              className="icon-button topbar-home-button"
+              type="button"
+              aria-label="返回产品首页"
+              title={connected ? "请先断开当前设备" : "返回产品首页"}
+              onClick={returnToProductHome}
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="breadcrumbs"><span>WL1 Studio</span><ChevronRight size={14} /><strong>{currentMeta.label}</strong><small>{currentMeta.eyebrow}</small></div>
+          </div>
           <div className="topbar-actions">
             <span className="topbar-clock"><Clock3 size={15} />{new Date().toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</span>
             <button className="icon-button" type="button" aria-label="帮助"><CircleHelp size={18} /></button>
