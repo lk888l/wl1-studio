@@ -167,9 +167,8 @@ export function KinematicsPage() {
     <div className="page-stack kinematics-page">
       <header className="page-heading">
         <div>
-          <span className="section-kicker">NATIVE KINEMATICS LAB</span>
           <h1>腿部运动学</h1>
-          <p>同步小车固件的腿高、逆解角度、舵机偏置和物理角度四重约束。动画与轨迹导出现在只覆盖固件实际能够执行的安全行程。</p>
+          <p>查看固件可执行行程内的腿高、逆解角度与舵机约束。</p>
         </div>
         <div className="heading-actions">
           <button className="secondary-button" type="button" onClick={reset}><RotateCcw size={16} />恢复原始参数</button>

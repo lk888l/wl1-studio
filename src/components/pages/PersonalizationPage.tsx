@@ -24,7 +24,7 @@ export function PersonalizationPage({ settings, persisted, onChange }: Personali
   return (
     <div className="page-stack personalization-page">
       <section className="page-heading">
-        <div><span className="section-kicker">MAKE IT YOURS</span><h1>个性设置</h1><p>视觉与工作流偏好保存在本机。LED、开机姿态等设备设置已预留，但当前固件没有持久化接口。</p></div>
+        <div><h1>个性设置</h1><p>调整界面与工作流偏好，设置仅保存在本机。</p></div>
         <button className="secondary-button" type="button" onClick={() => onChange(defaultPersonalization)}><RotateCcw size={16} />恢复默认</button>
       </section>
 

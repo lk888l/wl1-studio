@@ -75,7 +75,7 @@ export function TuningPage({
   return (
     <div className="page-stack">
       <section className="page-heading">
-        <div><span className="section-kicker">CONTROL LOOPS</span><h1>参数调校</h1><p>草稿先与本机会话基线比较，再逐项或按组请求下发。Legacy 固件没有读回与 ACK；“本次已请求”不是设备当前值。</p></div>
+        <div><h1>参数调校</h1><p>管理参数草稿并按组下发。Legacy 固件无读回与 ACK，“已请求”不等于设备当前值。</p></div>
         <div className="heading-actions">
           <button className="secondary-button" type="button" disabled={sending} onClick={onResetDraft}><RotateCcw size={16} />重置草稿</button>
           <button className="primary-button" type="button" disabled={!writesUnlocked || sending || sendablePending.length === 0} onClick={() => onSendMany(sendablePending)}><CloudUpload size={17} />下发待请求项 <b>{sendablePending.length}</b></button>

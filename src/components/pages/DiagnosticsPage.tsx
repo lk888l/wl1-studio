@@ -103,7 +103,7 @@ export function DiagnosticsPage({
   return (
     <div className="page-stack diagnostics-page">
       <section className="page-heading">
-        <div><span className="section-kicker">SERIAL DIAGNOSTICS</span><h1>诊断终端</h1><p>查看 Rust 后端发出的权威串口日志，或发送安全白名单内的单条 ASCII 命令。每条命令严格限制在 32 字节以内。</p></div>
+        <div><h1>诊断终端</h1><p>查看串口日志，并发送安全白名单内的单条 ASCII 命令。</p></div>
         <button className={connected ? "connection-button is-online" : "connection-button"} type="button" onClick={onConnectionOpen}><span className="status-orb" /><div><small>{connected ? "CONNECTED" : "OFFLINE"}</small><strong>{connection.label}</strong></div></button>
       </section>
 

@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Boxes,
-  Cable,
   Gauge,
   RefreshCw,
   ShieldCheck,
@@ -13,6 +12,7 @@ import {
 interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   safetyError: string | null;
+  launching: boolean;
   onRetrySafety: () => void;
   onOpenWl1: () => void;
 }
@@ -20,6 +20,7 @@ interface ProductHomeProps {
 export function ProductHome({
   safetyState,
   safetyError,
+  launching,
   onRetrySafety,
   onOpenWl1,
 }: ProductHomeProps) {
@@ -30,7 +31,7 @@ export function ProductHome({
       : "本机工作区";
 
   return (
-    <div className="product-hub">
+    <div className={`product-hub${launching ? " is-launching" : ""}`}>
       <div className="ambient ambient--one" />
       <div className="ambient ambient--two" />
       <div className="ambient ambient--three" />
@@ -42,11 +43,9 @@ export function ProductHome({
           </span>
           <span>
             <strong>设备控制中心</strong>
-            <small>PRODUCT CONSOLE</small>
           </span>
         </div>
         <div className="product-hub__status" aria-label="产品库状态">
-          <span className="product-count"><strong>1</strong> 个产品可用</span>
           <span className={`local-status is-${safetyState}`}><i />{safetyLabel}</span>
         </div>
       </header>
@@ -54,14 +53,9 @@ export function ProductHome({
       <main className="product-home">
         <section className="product-home__hero" aria-labelledby="product-home-title">
           <div className="product-home__intro">
-            <span className="section-kicker">PRODUCT LIBRARY · 产品库</span>
-            <h1 id="product-home-title">选择要控制的产品</h1>
-            <p>从产品工作区进入对应的连接、遥测、调参与诊断界面。当前已接入 WL1 轮腿小车，后续产品可在这里继续扩展。</p>
-          </div>
-          <div className="product-home__summary glass-card" aria-label="产品库摘要">
-            <span><small>AVAILABLE</small><strong>01</strong><em>已接入</em></span>
-            <span><small>CONNECTION</small><strong>02</strong><em>串口 / Mock</em></span>
-            <span><small>WORKSPACE</small><strong>06</strong><em>功能模块</em></span>
+            <span className="section-kicker">产品库</span>
+            <h1 id="product-home-title">选择产品，开始控制</h1>
+            <p>当前已接入 WL1 轮腿小车。</p>
           </div>
         </section>
 
@@ -79,17 +73,16 @@ export function ProductHome({
         <section className="product-catalog" aria-labelledby="available-products-title">
           <div className="product-section-heading">
             <div>
-              <span className="section-kicker">AVAILABLE PRODUCTS</span>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>01 / 01</span>
+            <span>1 个可用</span>
           </div>
 
           <div className="product-catalog__layout">
             <button
-              className={`product-card glass-card liquid-card is-${safetyState}`}
+              className={`product-card glass-card liquid-card is-${safetyState}${launching ? " is-launching" : ""}`}
               type="button"
-              disabled={safetyState !== "ready"}
+              disabled={safetyState !== "ready" || launching}
               aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
               title={safetyState === "ready" ? "进入 WL1 轮腿小车上位机" : "等待启动安全检查通过"}
               onClick={onOpenWl1}
@@ -132,56 +125,43 @@ export function ProductHome({
                     <path d="M247 126h26" stroke="#8294b0" strokeWidth="4" strokeLinecap="round" />
                   </g>
                 </svg>
-                <span className="product-card__visual-caption">WHEEL · LEG · BALANCE</span>
               </span>
 
               <span className="product-card__body">
                 <span className="product-card__meta">
                   <span className="product-available"><i />可用</span>
-                  <span>串口 · Mock</span>
                 </span>
                 <span className="product-card__title">
                   <strong>WL1 轮腿小车</strong>
-                  <small>Wheel-legged Robot</small>
                 </span>
-                <span className="product-card__description">用于 WL1 的设备连接、姿态与轮速遥测、PID 参数调校、实时运动控制、标定和诊断。</span>
+                <span className="product-card__description">连接、遥测、调校与运动控制集中在一个工作台。</span>
                 <span className="product-card__features">
                   <span><Activity size={15} />实时遥测</span>
                   <span><SlidersHorizontal size={15} />参数调校</span>
                   <span><Gauge size={15} />运动控制</span>
-                  <span><Cable size={15} />设备诊断</span>
                 </span>
                 <span className="product-card__action">
                   <span>
-                    <small>{safetyState === "ready" ? "OPEN STUDIO" : "SAFETY CHECK"}</small>
                     <strong>
-                      {safetyState === "checking"
+                      {launching
+                        ? "正在打开工作台…"
+                        : safetyState === "checking"
                         ? "正在准备设备会话…"
                         : safetyState === "error"
                           ? "等待安全检查通过"
-                          : "进入上位机"}
+                          : "进入 WL1 工作台"}
                     </strong>
                   </span>
                   {safetyState === "ready" ? <ArrowRight size={21} /> : <ShieldCheck size={20} />}
                 </span>
               </span>
             </button>
-
-            <aside className="product-catalog__note glass-card">
-              <span className="product-catalog__note-icon" aria-hidden="true"><Boxes size={21} /></span>
-              <span className="section-kicker">SCALABLE WORKSPACE</span>
-              <h3>为更多产品预留</h3>
-              <p>产品首页与具体控制工作台相互独立。新增设备时，可继续接入自己的协议、页面与安全策略。</p>
-              <span className="catalog-divider" />
-              <span className="catalog-safety"><ShieldCheck size={16} /><span><strong>安全隔离</strong><small>启动时清理遗留会话，切换产品前结束当前设备会话</small></span></span>
-            </aside>
           </div>
         </section>
       </main>
 
       <footer className="product-hub__footer">
-        <span><ShieldCheck size={15} />设备写入由各产品工作台独立校验</span>
-        <span>LOCAL PRODUCT CATALOG</span>
+        <span><ShieldCheck size={15} />安全检查通过后可进入设备工作台</span>
       </footer>
     </div>
   );

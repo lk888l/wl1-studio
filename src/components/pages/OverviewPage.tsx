@@ -44,9 +44,8 @@ export function OverviewPage({
     <div className="page-stack overview-page">
       <section className="hero-card glass-card liquid-card">
         <div className="hero-copy">
-          <span className="section-kicker">WL1 / READY FOR DISCOVERY</span>
-          <h1>让每一次调校，<br /><em>都有迹可循。</em></h1>
-          <p>面向 WL1 轮腿机器人的参数、控制、标定与诊断工作台。当前固件仍在演进，Studio 会明确区分已支持能力与预留接口。</p>
+          <h1>WL1 状态总览</h1>
+          <p>先连接设备，再查看遥测或进入调校、控制与诊断。</p>
           <div className="hero-actions">
             <button className="primary-button" type="button" onClick={connected ? () => onNavigate("tuning") : onConnect}>{connected ? "开始调校" : "连接机器人"}<ArrowRight size={17} /></button>
             <button className="secondary-button" type="button" onClick={() => onNavigate("diagnostics")}>打开诊断终端</button>
@@ -54,7 +53,7 @@ export function OverviewPage({
         </div>
         <div className="hero-status-stack">
           <div className={`connection-pill${connected ? " is-online" : ""}`}>
-            <span className="status-orb" /><div><small>{connected ? "DEVICE ONLINE" : "DEVICE OFFLINE"}</small><strong>{connection.label}</strong></div>
+            <span className="status-orb" /><div><small>{connected ? "设备在线" : "设备离线"}</small><strong>{connection.label}</strong></div>
           </div>
           <div className="firmware-chip"><ShieldCheck size={18} /><span><small>协议兼容层</small><strong>Legacy ASCII · v0</strong></span></div>
         </div>
@@ -90,13 +89,13 @@ export function OverviewPage({
 
       <section className="quick-grid">
         <button className="quick-card glass-card" type="button" onClick={() => onNavigate("tuning")}>
-          <span className="quick-number">01</span><div><small>PRECISION</small><strong>参数调校</strong><p>按控制环分组管理脏值，并节流下发到固件。</p></div><ChevronRight size={20} />
+          <span className="quick-number">01</span><div><strong>参数调校</strong><p>查看并下发控制参数</p></div><ChevronRight size={20} />
         </button>
         <button className="quick-card glass-card" type="button" onClick={() => onNavigate("calibration")}>
-          <span className="quick-number">02</span><div><small>GUIDED</small><strong>四步标定</strong><p>采样、校零、腿高与本地记录形成完整闭环。</p></div><ChevronRight size={20} />
+          <span className="quick-number">02</span><div><strong>四步标定</strong><p>完成校零、腿高与记录</p></div><ChevronRight size={20} />
         </button>
         <button className="quick-card glass-card" type="button" onClick={() => onNavigate("control")}>
-          <span className="quick-number">03</span><div><small>HOLD TO MOVE</small><strong>安全控制</strong><p>按住才发送 R 帧，释放立即回到中立目标。</p></div><ChevronRight size={20} />
+          <span className="quick-number">03</span><div><strong>安全控制</strong><p>按住移动，释放即停止</p></div><ChevronRight size={20} />
         </button>
       </section>
     </div>

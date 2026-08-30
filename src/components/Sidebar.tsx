@@ -12,14 +12,14 @@ import {
 
 import type { ConnectionSnapshot, PageId } from "../types";
 
-const navigation: Array<{ id: PageId; label: string; eyebrow: string; icon: LucideIcon }> = [
-  { id: "overview", label: "总览", eyebrow: "Overview", icon: Activity },
-  { id: "kinematics", label: "腿部运动学", eyebrow: "Kinematics", icon: GitFork },
-  { id: "tuning", label: "参数调校", eyebrow: "Tuning", icon: SlidersHorizontal },
-  { id: "control", label: "实时控制", eyebrow: "Control", icon: Radio },
-  { id: "calibration", label: "标定向导", eyebrow: "Calibration", icon: WandSparkles },
-  { id: "personalization", label: "个性设置", eyebrow: "Personalize", icon: Sparkles },
-  { id: "diagnostics", label: "诊断终端", eyebrow: "Diagnostics", icon: Stethoscope },
+const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
+  { id: "overview", label: "总览", icon: Activity },
+  { id: "kinematics", label: "腿部运动学", icon: GitFork },
+  { id: "tuning", label: "参数调校", icon: SlidersHorizontal },
+  { id: "control", label: "实时控制", icon: Radio },
+  { id: "calibration", label: "标定向导", icon: WandSparkles },
+  { id: "personalization", label: "个性设置", icon: Sparkles },
+  { id: "diagnostics", label: "诊断终端", icon: Stethoscope },
 ];
 
 interface SidebarProps {
@@ -56,7 +56,7 @@ export function Sidebar({ page, robotName, connection, onPageChange, onConnectio
               onClick={() => onPageChange(item.id)}
             >
               <span className="nav-icon"><Icon size={19} /></span>
-              <span className="nav-copy"><strong>{item.label}</strong><small>{item.eyebrow}</small></span>
+              <span className="nav-copy"><strong>{item.label}</strong></span>
             </button>
           );
         })}

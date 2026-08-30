@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
+  Gauge,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -46,14 +47,14 @@ import type {
   TelemetrySample,
 } from "./types";
 
-const pageMeta: Record<PageId, { label: string; eyebrow: string }> = {
-  overview: { label: "总览", eyebrow: "Overview" },
-  kinematics: { label: "腿部运动学", eyebrow: "Kinematics" },
-  tuning: { label: "参数调校", eyebrow: "Tuning" },
-  control: { label: "实时控制", eyebrow: "Control" },
-  calibration: { label: "标定向导", eyebrow: "Calibration" },
-  personalization: { label: "个性设置", eyebrow: "Personalize" },
-  diagnostics: { label: "诊断终端", eyebrow: "Diagnostics" },
+const pageMeta: Record<PageId, { label: string }> = {
+  overview: { label: "总览" },
+  kinematics: { label: "腿部运动学" },
+  tuning: { label: "参数调校" },
+  control: { label: "实时控制" },
+  calibration: { label: "标定向导" },
+  personalization: { label: "个性设置" },
+  diagnostics: { label: "诊断终端" },
 };
 
 const builtinProfiles: ParameterProfile[] = [
@@ -122,6 +123,7 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
 }
 
 type AppView = "products" | "wl1";
+type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
 interface Wl1StudioProps {
@@ -130,6 +132,7 @@ interface Wl1StudioProps {
 
 export default function App() {
   const [view, setView] = useState<AppView>("products");
+  const [productTransition, setProductTransition] = useState<ProductTransitionState>("idle");
   const [catalogSafety, setCatalogSafety] = useState<CatalogSafetyState>("checking");
   const [catalogSafetyError, setCatalogSafetyError] = useState<string | null>(null);
   const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
@@ -159,20 +162,57 @@ export default function App() {
       : "WL1 Studio · 轮腿控制中心";
   }, [view]);
 
-  if (view === "products") {
-    return (
-      <ProductHome
-        safetyState={catalogSafety}
-        safetyError={catalogSafetyError}
-        onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
-        onOpenWl1={() => {
-          if (catalogSafety === "ready") setView("wl1");
-        }}
-      />
-    );
-  }
+  useEffect(() => {
+    if (productTransition === "idle") return;
+    const duration = productTransition === "covering" ? 460 : 560;
+    const timer = window.setTimeout(() => {
+      if (productTransition === "covering") {
+        setView("wl1");
+        setProductTransition("revealing");
+      } else {
+        setProductTransition("idle");
+      }
+    }, duration);
+    return () => window.clearTimeout(timer);
+  }, [productTransition]);
 
-  return <Wl1Studio onBack={() => setView("products")} />;
+  const openWl1 = useCallback((): void => {
+    if (catalogSafety !== "ready" || productTransition !== "idle") return;
+    setProductTransition("covering");
+  }, [catalogSafety, productTransition]);
+
+  return (
+    <div className="app-stage">
+      {view === "products" ? (
+        <ProductHome
+          safetyState={catalogSafety}
+          safetyError={catalogSafetyError}
+          launching={productTransition === "covering"}
+          onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
+          onOpenWl1={openWl1}
+        />
+      ) : (
+        <Wl1Studio onBack={() => setView("products")} />
+      )}
+
+      {productTransition !== "idle" && (
+        <div
+          className={`product-transition is-${productTransition}`}
+          role="status"
+          aria-label="正在打开 WL1 工作台"
+        >
+          <span className="product-transition__wash" />
+          <span className="product-transition__content">
+            <span className="product-transition__mark" aria-hidden="true">
+              <Gauge size={29} strokeWidth={2.2} />
+              <i />
+            </span>
+            <span><small>正在打开</small><strong>WL1 Studio</strong></span>
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Wl1Studio({ onBack }: Wl1StudioProps) {
@@ -548,7 +588,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
             >
               <ArrowLeft size={18} />
             </button>
-            <div className="breadcrumbs"><span>WL1 Studio</span><ChevronRight size={14} /><strong>{currentMeta.label}</strong><small>{currentMeta.eyebrow}</small></div>
+            <div className="breadcrumbs"><span>WL1 控制台</span><ChevronRight size={14} /><strong>{currentMeta.label}</strong></div>
           </div>
           <div className="topbar-actions">
             <span className="topbar-clock"><Clock3 size={15} />{new Date().toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</span>

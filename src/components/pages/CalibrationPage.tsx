@@ -136,7 +136,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
   return (
     <div className="page-stack calibration-page">
       <section className="page-heading">
-        <div><span className="section-kicker">GUIDED CALIBRATION</span><h1>标定向导</h1><p>以“先观察、后请求、再记录”为原则完成首版标定。所有结果均明确区分本地计算与固件写入。</p></div>
+        <div><h1>标定向导</h1><p>按步骤完成姿态、腿高与本地记录标定；设备写入会单独标识。</p></div>
         <span className="soft-badge">步骤 {step + 1} / {stepItems.length}</span>
       </section>
 

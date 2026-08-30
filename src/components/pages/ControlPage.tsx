@@ -211,9 +211,8 @@ export function ControlPage({
     <div className="page-stack control-page">
       <section className="page-heading">
         <div>
-          <span className="section-kicker">HOLD TO MOVE</span>
           <h1>实时控制</h1>
-          <p>先明确选择本会话腿高，再按住方向键或 W/A/S/D 以 20 Hz 发送 R 目标帧；松开、失焦、隐藏页面或离开本页都会清零三轴并保留该目标。</p>
+          <p>先选择腿高，再按住方向键或 W/A/S/D 控制；松开或离开页面会立即归零运动目标。</p>
         </div>
         <button className="stop-button" type="button" disabled={!writesUnlocked || heightTarget === null} onClick={() => void emergencyStop()}>
           <Octagon size={19} />立即停止
