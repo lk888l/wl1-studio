@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Clock3,
   Gauge,
+  Music2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -17,6 +18,7 @@ import { KinematicsPage } from "./components/pages/KinematicsPage";
 import { OverviewPage } from "./components/pages/OverviewPage";
 import { PersonalizationPage } from "./components/pages/PersonalizationPage";
 import { TuningPage } from "./components/pages/TuningPage";
+import { PianoStudio } from "./components/piano/PianoStudio";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ProductHome } from "./components/ProductHome";
 import { Sidebar } from "./components/Sidebar";
@@ -122,7 +124,7 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
   return next;
 }
 
-type AppView = "products" | "wl1";
+type AppView = "products" | "wl1" | "piano";
 type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
@@ -133,6 +135,7 @@ interface Wl1StudioProps {
 export default function App() {
   const [view, setView] = useState<AppView>("products");
   const [productTransition, setProductTransition] = useState<ProductTransitionState>("idle");
+  const [launchTarget, setLaunchTarget] = useState<Exclude<AppView, "products"> | null>(null);
   const [catalogSafety, setCatalogSafety] = useState<CatalogSafetyState>("checking");
   const [catalogSafetyError, setCatalogSafetyError] = useState<string | null>(null);
   const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
@@ -159,7 +162,9 @@ export default function App() {
   useEffect(() => {
     document.title = view === "products"
       ? "设备控制中心 · 选择产品"
-      : "WL1 Studio · 轮腿控制中心";
+      : view === "wl1"
+        ? "WL1 Studio · 轮腿控制中心"
+        : "KeyNest Studio · 口袋电子琴";
   }, [view]);
 
   useEffect(() => {
@@ -167,19 +172,27 @@ export default function App() {
     const duration = productTransition === "covering" ? 460 : 560;
     const timer = window.setTimeout(() => {
       if (productTransition === "covering") {
-        setView("wl1");
+        if (!launchTarget) {
+          setProductTransition("idle");
+          return;
+        }
+        setView(launchTarget);
         setProductTransition("revealing");
       } else {
         setProductTransition("idle");
+        setLaunchTarget(null);
       }
     }, duration);
     return () => window.clearTimeout(timer);
-  }, [productTransition]);
+  }, [launchTarget, productTransition]);
 
-  const openWl1 = useCallback((): void => {
+  const openProduct = useCallback((target: Exclude<AppView, "products">): void => {
     if (catalogSafety !== "ready" || productTransition !== "idle") return;
+    setLaunchTarget(target);
     setProductTransition("covering");
   }, [catalogSafety, productTransition]);
+
+  const launchLabel = launchTarget === "piano" ? "KeyNest Studio" : "WL1 Studio";
 
   return (
     <div className="app-stage">
@@ -187,27 +200,30 @@ export default function App() {
         <ProductHome
           safetyState={catalogSafety}
           safetyError={catalogSafetyError}
-          launching={productTransition === "covering"}
+          launching={productTransition === "covering" ? launchTarget : null}
           onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
-          onOpenWl1={openWl1}
+          onOpenWl1={() => openProduct("wl1")}
+          onOpenPiano={() => openProduct("piano")}
         />
-      ) : (
+      ) : view === "wl1" ? (
         <Wl1Studio onBack={() => setView("products")} />
+      ) : (
+        <PianoStudio onBack={() => setView("products")} />
       )}
 
       {productTransition !== "idle" && (
         <div
           className={`product-transition is-${productTransition}`}
           role="status"
-          aria-label="正在打开 WL1 工作台"
+          aria-label={`正在打开 ${launchLabel}`}
         >
           <span className="product-transition__wash" />
           <span className="product-transition__content">
             <span className="product-transition__mark" aria-hidden="true">
-              <Gauge size={29} strokeWidth={2.2} />
+              {launchTarget === "piano" ? <Music2 size={29} strokeWidth={2.2} /> : <Gauge size={29} strokeWidth={2.2} />}
               <i />
             </span>
-            <span><small>正在打开</small><strong>WL1 Studio</strong></span>
+            <span><small>正在打开</small><strong>{launchLabel}</strong></span>
           </span>
         </div>
       )}
