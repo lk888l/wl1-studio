@@ -26,11 +26,14 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://localhost:1420 ws://localhost:1420; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "freezePrototype": true
     }
   },
   "bundle": {
     "active": true,
+    "useLocalToolsDir": true,
     "targets": "all",
     "category": "Utility",
     "shortDescription": "可扩展的机器人设备控制与诊断工具",

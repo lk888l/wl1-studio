@@ -15,13 +15,13 @@ export function LiveChart({ samples, compact = false }: LiveChartProps) {
   const rollPath = chartPath(visible, (sample) => sample.roll, WIDTH, HEIGHT, 12);
   const latest = visible.at(-1);
   return (
-    <div className="live-chart" aria-label="实时姿态曲线">
+    <section className="live-chart" aria-label="实时姿态曲线">
       <div className="chart-toolbar">
         <div>
           <span className="section-kicker">LIVE ATTITUDE</span>
           <h3>实时姿态</h3>
         </div>
-        <div className="chart-legend" aria-label="图例">
+        <div className="chart-legend">
           <span><i className="legend-dot is-pitch" />俯仰 {latest?.pitch.toFixed(2) ?? "--"}°</span>
           <span><i className="legend-dot is-roll" />横滚 {latest?.roll.toFixed(2) ?? "--"}°</span>
         </div>
@@ -54,6 +54,6 @@ export function LiveChart({ samples, compact = false }: LiveChartProps) {
         <span>窗口约 {Math.max(1, Math.round(visible.length / 20))} 秒</span>
         <span className="live-indicator"><i /> 20 Hz UI</span>
       </div>
-    </div>
+    </section>
   );
 }

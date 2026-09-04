@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "WL1 Studio 主窗口所需的最小权限",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

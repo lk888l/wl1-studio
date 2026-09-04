@@ -15,6 +15,7 @@ import {
 
 interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
+  pianoPreviewEnabled: boolean;
   safetyError: string | null;
   launching: "wl1" | "piano" | null;
   onRetrySafety: () => void;
@@ -25,6 +26,7 @@ interface ProductHomeProps {
 export function ProductHome({
   safetyState,
   safetyError,
+  pianoPreviewEnabled,
   launching,
   onRetrySafety,
   onOpenWl1,
@@ -51,7 +53,7 @@ export function ProductHome({
             <strong>设备控制中心</strong>
           </span>
         </div>
-        <div className="product-hub__status" aria-label="产品库状态">
+        <div className="product-hub__status" role="status" aria-label="产品库状态">
           <span className={`local-status is-${safetyState}`}><i />{safetyLabel}</span>
         </div>
       </header>
@@ -81,7 +83,7 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>2 个可用</span>
+            <span>1 个设备已接入 · 1 个交互预览</span>
           </div>
 
           <div className="product-catalog__layout">
@@ -95,7 +97,7 @@ export function ProductHome({
             >
               <span className="product-card__visual" aria-hidden="true">
                 <span className="product-card__model">WL1</span>
-                <svg viewBox="0 0 520 300">
+                <svg viewBox="0 0 520 300" aria-hidden="true">
                   <defs>
                     <linearGradient id="hubRobotBody" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0" stopColor="#ffffff" />
@@ -166,14 +168,16 @@ export function ProductHome({
             <button
               className={`product-card product-card--piano glass-card liquid-card is-${safetyState}${launching === "piano" ? " is-launching" : ""}`}
               type="button"
-              disabled={safetyState !== "ready" || Boolean(launching)}
+              disabled={!pianoPreviewEnabled || safetyState !== "ready" || Boolean(launching)}
               aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
-              title={safetyState === "ready" ? "进入口袋电子琴上位机" : "等待启动安全检查通过"}
+              title={!pianoPreviewEnabled
+                ? "生产构建默认关闭未接入硬件协议的预览"
+                : safetyState === "ready" ? "进入口袋电子琴交互预览" : "等待启动安全检查通过"}
               onClick={onOpenPiano}
             >
               <span className="product-card__visual" aria-hidden="true">
                 <span className="product-card__model">PK-51</span>
-                <svg viewBox="0 0 520 300">
+                <svg viewBox="0 0 520 300" aria-hidden="true">
                   <defs>
                     <linearGradient id="hubPianoBody" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0" stopColor="#fff8f2" />
@@ -214,13 +218,13 @@ export function ProductHome({
               </span>
 
               <span className="product-card__body">
-                <span className="product-card__meta"><span className="product-available"><i />新接入</span></span>
+                <span className="product-card__meta"><span className="product-available"><i />交互预览</span></span>
                 <span className="product-card__title"><strong>口袋电子琴</strong></span>
-                <span className="product-card__description">面向 51 单片机与无源蜂鸣器的编曲、配键、曲库和固件工作台。</span>
+                <span className="product-card__description">编曲与协议交互预览；硬件协议尚未接入，生产构建默认关闭入口。</span>
                 <span className="product-card__features">
                   <span><Music2 size={15} />曲谱编辑</span>
                   <span><Keyboard size={15} />琴键配调</span>
-                  <span><Upload size={15} />串口写曲</span>
+                  <span><Upload size={15} />写曲流程预览</span>
                 </span>
                 <span className="product-card__action">
                   <span>
@@ -231,10 +235,12 @@ export function ProductHome({
                           ? "正在准备设备会话…"
                           : safetyState === "error"
                             ? "等待安全检查通过"
-                            : "进入电子琴工作台"}
+                            : pianoPreviewEnabled
+                              ? "进入电子琴交互预览"
+                              : "协议未接入 · 生产入口关闭"}
                     </strong>
                   </span>
-                  {safetyState === "ready" ? <ArrowRight size={21} /> : <Cpu size={20} />}
+                  {pianoPreviewEnabled && safetyState === "ready" ? <ArrowRight size={21} /> : <Cpu size={20} />}
                 </span>
               </span>
             </button>

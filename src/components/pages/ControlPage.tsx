@@ -10,7 +10,7 @@ import {
   SlidersHorizontal,
   WifiOff,
 } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
 import { HoldCommandRepeater, neutralMotion } from "../../lib/hold-control";
 import { motionCommand } from "../../lib/device";
@@ -73,7 +73,7 @@ export function ControlPage({
   const wasActive = useRef(false);
   const settings = useRef({ speed, roll, height });
 
-  const composeTarget = (): MotionTarget => {
+  const composeTarget = useCallback((): MotionTarget => {
     const active = new Set(keyboardDirections.current);
     if (pointerDirection.current) active.add(pointerDirection.current);
     const velocity =
@@ -83,9 +83,9 @@ export function ControlPage({
       (active.has("right") ? settings.current.speed : 0) -
       (active.has("left") ? settings.current.speed : 0);
     return { turn, velocity, roll: settings.current.roll, height: settings.current.height };
-  };
+  }, []);
 
-  const syncSender = (): void => {
+  const syncSender = useCallback((): void => {
     const hasInput = keyboardDirections.current.size > 0 || pointerDirection.current !== null;
     if (hasInput) {
       const target = composeTarget();
@@ -98,14 +98,14 @@ export function ControlPage({
       wasActive.current = false;
       repeater.current?.release();
     }
-  };
+  }, [composeTarget]);
 
-  const stopAll = (): void => {
+  const stopAll = useCallback((): void => {
     keyboardDirections.current.clear();
     pointerDirection.current = null;
     setActiveDirection(null);
     syncSender();
-  };
+  }, [syncSender]);
 
   useEffect(() => {
     repeater.current = new HoldCommandRepeater(
@@ -123,7 +123,7 @@ export function ControlPage({
   useEffect(() => {
     settings.current = { speed, roll, height };
     if (wasActive.current) repeater.current?.update(composeTarget());
-  }, [height, roll, speed]);
+  }, [composeTarget, height, roll, speed]);
 
   useEffect(() => {
     if (!connected || !writesUnlocked || suspended || heightTarget === null || !telemetryHealthy) {
@@ -133,7 +133,7 @@ export function ControlPage({
     } else if (!armed) {
       stopAll();
     }
-  }, [armed, connected, heightTarget, suspended, telemetryHealthy, writesUnlocked]);
+  }, [armed, connected, heightTarget, stopAll, suspended, telemetryHealthy, writesUnlocked]);
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -167,7 +167,7 @@ export function ControlPage({
       document.removeEventListener("visibilitychange", visibility);
       stopAll();
     };
-  }, [connected, heightTarget, suspended, telemetryHealthy, writesUnlocked]);
+  }, [connected, heightTarget, stopAll, suspended, syncSender, telemetryHealthy, writesUnlocked]);
 
   const beginPointer = (direction: Direction, event: PointerEvent<HTMLButtonElement>): void => {
     if (!armedRef.current || !connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null) return;

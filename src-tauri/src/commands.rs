@@ -12,28 +12,47 @@ pub fn list_serial_ports() -> Result<Vec<SerialPortOption>, String> {
     Ok(ports
         .into_iter()
         .map(|port| {
-            let (port_type, manufacturer, product, serial_number) = match port.port_type {
+            let (port_type, vid, pid, manufacturer, product, serial_number) = match port.port_type {
                 serialport::SerialPortType::UsbPort(info) => (
                     "usb".to_owned(),
+                    Some(info.vid),
+                    Some(info.pid),
                     info.manufacturer,
                     info.product,
                     info.serial_number,
                 ),
                 serialport::SerialPortType::BluetoothPort => {
-                    ("bluetooth".to_owned(), None, None, None)
+                    ("bluetooth".to_owned(), None, None, None, None, None)
                 }
-                serialport::SerialPortType::PciPort => ("pci".to_owned(), None, None, None),
-                serialport::SerialPortType::Unknown => ("unknown".to_owned(), None, None, None),
+                serialport::SerialPortType::PciPort => {
+                    ("pci".to_owned(), None, None, None, None, None)
+                }
+                serialport::SerialPortType::Unknown => {
+                    ("unknown".to_owned(), None, None, None, None, None)
+                }
             };
             SerialPortOption {
                 name: port.port_name,
                 port_type,
+                vid,
+                pid,
                 manufacturer,
                 product,
                 serial_number,
             }
         })
         .collect())
+}
+
+fn ensure_serial_port_available(port_name: &str) -> Result<(), String> {
+    if list_serial_ports()?
+        .iter()
+        .any(|port| port.name == port_name)
+    {
+        Ok(())
+    } else {
+        Err("所选串口已不可用或不在系统串口枚举列表中；请刷新设备列表后重试".into())
+    }
 }
 
 #[tauri::command]
@@ -51,8 +70,10 @@ pub fn connect_device(
             let port_name = config
                 .port_name
                 .as_deref()
-                .filter(|name| !name.trim().is_empty())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
+            ensure_serial_port_available(port_name)?;
             state.connect_serial(app, port_name, config.baud_rate, config.allow_unsafe_writes)
         }
     }

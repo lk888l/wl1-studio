@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["src/**", "vite.config.ts"]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noArrayIndexKey": "off"
+      }
+    }
+  }
+}

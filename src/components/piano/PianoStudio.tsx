@@ -82,6 +82,8 @@ interface StoredPianoState {
   slots?: DeviceSong[];
 }
 
+const PIANO_PREVIEW_CHANNELS = ["SIM-PK51-01", "SIM-PK51-02", "SIM-PK51-03"] as const;
+
 const TOTAL_BEATS = 32;
 const MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11, 12];
 const KEY_SHORTCUTS = ["A", "S", "D", "F", "J", "K", "L", ";"];
@@ -208,7 +210,7 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
   const [playing, setPlaying] = useState(false);
   const [activeLane, setActiveLane] = useState<number | null>(null);
   const [connected, setConnected] = useState(false);
-  const [port, setPort] = useState("COM3");
+  const [port, setPort] = useState<string>(PIANO_PREVIEW_CHANNELS[0]);
   const [baudRate, setBaudRate] = useState(115200);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [connectionBusy, setConnectionBusy] = useState(false);
@@ -600,8 +602,8 @@ function ComposerPage({ title, bpm, tonicLabel, notes, bindings, duration, selec
       <section className="composer-toolbar glass-card">
         <label className="composer-title-input"><span>曲目名称</span><input value={title} maxLength={32} onChange={(event) => onTitleChange(event.target.value)} /></label>
         <label className="compact-field"><span>速度</span><div><input type="number" min={40} max={240} value={bpm} onChange={(event) => onBpmChange(Math.min(240, Math.max(40, Number(event.target.value) || 40)))} /><small>BPM</small></div></label>
-        <label className="compact-field"><span>拍号</span><div className="compact-static">4 / 4</div></label>
-        <label className="compact-field"><span>调式</span><div className="compact-static">{tonicLabel}</div></label>
+        <div className="compact-field"><span>拍号</span><div className="compact-static">4 / 4</div></div>
+        <div className="compact-field"><span>调式</span><div className="compact-static">{tonicLabel}</div></div>
         <div className="composer-toolbar__spacer" />
         <button className="icon-button icon-button--danger" type="button" aria-label="清空曲谱" title="清空曲谱" disabled={notes.length === 0} onClick={onClear}><Trash2 size={17} /></button>
       </section>
@@ -822,7 +824,7 @@ interface FirmwarePageProps {
 function FirmwarePage({ connected, port, onNotice }: FirmwarePageProps) {
   const [file, setFile] = useState<FirmwareFileMeta | null>(null);
   const [target, setTarget] = useState("STC89C52RC");
-  const [selectedPort, setSelectedPort] = useState(connected ? port : "COM3");
+  const [selectedPort, setSelectedPort] = useState(connected ? port : PIANO_PREVIEW_CHANNELS[0]);
   const [baud, setBaud] = useState(115200);
   const [eraseFlash, setEraseFlash] = useState(true);
   const [verify, setVerify] = useState(true);
@@ -894,7 +896,7 @@ function FirmwarePage({ connected, port, onNotice }: FirmwarePageProps) {
             <header><span>02</span><div><h2>目标与串口</h2><p>匹配芯片型号和 ISP 下载参数</p></div><Settings2 size={20} /></header>
             <div className="firmware-fields">
               <label><span>目标芯片</span><div className="select-shell"><select value={target} onChange={(event) => setTarget(event.target.value)}><option>STC89C52RC</option><option>STC89C51RC</option><option>AT89S52</option></select><ChevronDown size={15} /></div><small>首选低成本 8 位 51 方案</small></label>
-              <label><span>串口</span><div className="select-shell"><select value={selectedPort} onChange={(event) => setSelectedPort(event.target.value)}><option>COM3</option><option>COM5</option><option>COM8</option></select><ChevronDown size={15} /></div><small>{connected && selectedPort === port ? "当前演示设备端口" : "等待后端枚举"}</small></label>
+              <label><span>演示通道</span><div className="select-shell"><select value={selectedPort} onChange={(event) => setSelectedPort(event.target.value)}>{PIANO_PREVIEW_CHANNELS.map((channel) => <option key={channel}>{channel}</option>)}</select><ChevronDown size={15} /></div><small>{connected && selectedPort === port ? "当前模拟通道" : "硬件端口未接入"}</small></label>
               <label><span>最高波特率</span><div className="select-shell"><select value={baud} onChange={(event) => setBaud(Number(event.target.value))}><option value={9600}>9,600</option><option value={57600}>57,600</option><option value={115200}>115,200</option></select><ChevronDown size={15} /></div><small>实际速率由 ISP 握手协商</small></label>
             </div>
           </article>
@@ -956,7 +958,7 @@ function PianoConnectionModal({ open, connected, port, baudRate, busy, onClose, 
   };
 
   return (
-    <div className="modal-backdrop piano-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal-backdrop piano-modal-backdrop">
       <section className="connection-modal piano-connection-modal" role="dialog" aria-modal="true" aria-labelledby="piano-connection-title">
         <header><div><span className="connection-modal__icon"><Usb size={21} /></span><div><span className="section-kicker">SERIAL LINK</span><h2 id="piano-connection-title">连接口袋电子琴</h2></div></div><button className="icon-button" type="button" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>
         {connected ? (
@@ -969,7 +971,7 @@ function PianoConnectionModal({ open, connected, port, baudRate, busy, onClose, 
           <form onSubmit={submit}>
             <div className="piano-modal-note"><CircuitBoard size={18} /><p><strong>当前先验证上位机交互</strong>尚未绑定电子琴串口协议；“模拟连接”不会打开真实端口。</p></div>
             <div className="piano-connection-fields">
-              <label><span>串口</span><div className="select-shell"><select value={draftPort} onChange={(event) => setDraftPort(event.target.value)}><option>COM3</option><option>COM5</option><option>COM8</option></select><ChevronDown size={15} /></div></label>
+              <label><span>演示通道</span><div className="select-shell"><select value={draftPort} onChange={(event) => setDraftPort(event.target.value)}>{PIANO_PREVIEW_CHANNELS.map((channel) => <option key={channel}>{channel}</option>)}</select><ChevronDown size={15} /></div></label>
               <label><span>波特率</span><div className="select-shell"><select value={draftBaud} onChange={(event) => setDraftBaud(Number(event.target.value))}><option value={9600}>9,600</option><option value={57600}>57,600</option><option value={115200}>115,200</option></select><ChevronDown size={15} /></div></label>
             </div>
             <div className="piano-protocol-preview"><span><i />TX</span><code>AA 55 01 00 CRC</code><small>握手帧草案</small></div>

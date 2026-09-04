@@ -42,12 +42,9 @@ export function RobotVisual({ sample, connected, telemetryFresh, name, ledColor 
             <stop offset="0" stopColor="#26334d" />
             <stop offset="1" stopColor="#10192b" />
           </linearGradient>
-          <filter id="robotShadow" x="-40%" y="-40%" width="180%" height="180%">
-            <feDropShadow dx="0" dy="14" stdDeviation="13" floodColor="#284066" floodOpacity=".22" />
-          </filter>
         </defs>
         <ellipse cx="215" cy="279" rx="150" ry="18" fill="#86a5d4" opacity=".14" />
-        <g className="robot-rig" filter="url(#robotShadow)">
+        <g className="robot-rig">
           <g className="robot-wheel robot-wheel--left">
             <circle cx="96" cy="245" r="43" fill="url(#robotDark)" />
             <circle cx="96" cy="245" r="30" fill="#34425e" stroke="#8293ae" strokeWidth="3" />

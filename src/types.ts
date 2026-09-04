@@ -12,6 +12,8 @@ export type ConnectionMode = "disconnected" | "mock" | "serial";
 export interface SerialPortOption {
   name: string;
   portType: string;
+  vid?: number;
+  pid?: number;
   manufacturer?: string;
   product?: string;
   serialNumber?: string;

@@ -434,6 +434,8 @@ export class DeviceGateway {
   private normalizePort(value: unknown): SerialPortOption {
     const port = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
     return {
+      vid: numeric(port.vid),
+      pid: numeric(port.pid),
       name: String(port.name ?? port.port_name ?? port.path ?? "未知串口"),
       portType: String(port.portType ?? port.port_type ?? port.type ?? "Serial"),
       manufacturer: typeof port.manufacturer === "string" ? port.manufacturer : undefined,

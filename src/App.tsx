@@ -128,6 +128,9 @@ type AppView = "products" | "wl1" | "piano";
 type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
+const pianoPreviewEnabled = import.meta.env.DEV
+  || import.meta.env.VITE_ENABLE_PIANO_PREVIEW === "true";
+
 interface Wl1StudioProps {
   onBack: () => void;
 }
@@ -141,6 +144,9 @@ export default function App() {
   const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
 
   useEffect(() => {
+    // The generation is intentionally read only to make each explicit retry
+    // start a fresh initialization attempt.
+    void catalogSafetyAttempt;
     let cancelled = false;
     setCatalogSafety("checking");
     setCatalogSafetyError(null);
@@ -188,6 +194,7 @@ export default function App() {
 
   const openProduct = useCallback((target: Exclude<AppView, "products">): void => {
     if (catalogSafety !== "ready" || productTransition !== "idle") return;
+    if (target === "piano" && !pianoPreviewEnabled) return;
     setLaunchTarget(target);
     setProductTransition("covering");
   }, [catalogSafety, productTransition]);
@@ -200,6 +207,7 @@ export default function App() {
         <ProductHome
           safetyState={catalogSafety}
           safetyError={catalogSafetyError}
+          pianoPreviewEnabled={pianoPreviewEnabled}
           launching={productTransition === "covering" ? launchTarget : null}
           onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
           onOpenWl1={() => openProduct("wl1")}
@@ -269,7 +277,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
       setSamples((items) => appendTelemetrySample(items, event.sample, 240));
       // Keep the freshness reference at least as new as the sample being
       // rendered. A slower 250 ms wall-clock tick must not classify a newly
-      // arrived 20/30 Hz frame as a future (therefore stale) timestamp.
+      // arrived 20 Hz frame as a future (therefore stale) timestamp.
       setFreshnessNow(Math.max(Date.now(), event.sample.timestamp));
     } else if (event.type === "console") {
       setConsoleEntries((items) => [...items.slice(-599), event.entry]);
@@ -292,6 +300,8 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
   }), []);
 
   useEffect(() => {
+    // Retries deliberately re-run the complete backend cleanup handshake.
+    void startupAttempt;
     let cancelled = false;
     setConnectionBusy(true);
     setConnectionError(null);
@@ -330,9 +340,12 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
   }, [personalization]);
 
   useEffect(() => {
+    // Nothing can become stale while disconnected. Avoid waking and
+    // re-rendering the whole product hub four times per second while idle.
+    if (!connected) return;
     const timer = window.setInterval(() => setFreshnessNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [connected]);
 
   const refreshPorts = useCallback(async (): Promise<void> => {
     setConnectionBusy(true);

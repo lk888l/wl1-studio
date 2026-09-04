@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod commands;
 mod protocol;
 mod state;
@@ -6,7 +8,33 @@ mod types;
 
 use tauri::Manager;
 
+#[cfg(target_os = "linux")]
+fn linux_effective_uid(proc_status: &str) -> Option<u32> {
+    let uid_line = proc_status.lines().find(|line| line.starts_with("Uid:"))?;
+    let mut fields = uid_line.split_ascii_whitespace();
+    if fields.next()? != "Uid:" {
+        return None;
+    }
+    let _real_uid = fields.next()?;
+    fields.next()?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn refuse_linux_root_execution() {
+    let Ok(proc_status) = std::fs::read_to_string("/proc/self/status") else {
+        return;
+    };
+    if linux_effective_uid(&proc_status) == Some(0) {
+        eprintln!(
+            "WL1 Studio refuses to run as root. Grant serial access through dialout or a precise udev rule."
+        );
+        std::process::exit(1);
+    }
+}
+
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    refuse_linux_root_execution();
     tauri::Builder::default()
         .manage(state::AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -30,4 +58,20 @@ pub fn run() {
                 let _ = state.disconnect(None);
             }
         });
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::linux_effective_uid;
+
+    #[test]
+    fn parses_linux_effective_uid() {
+        let status = "Name:\twl1-studio\nUid:\t1000\t1001\t1002\t1003\n";
+        assert_eq!(linux_effective_uid(status), Some(1001));
+    }
+
+    #[test]
+    fn rejects_malformed_linux_uid_status() {
+        assert_eq!(linux_effective_uid("Uid:\tinvalid\n"), None);
+    }
 }

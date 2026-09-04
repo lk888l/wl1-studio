@@ -3,33 +3,39 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "packageManager": "npm@10.8.2",
+  "packageManager": "npm@11.16.0",
   "engines": {
-    "node": ">=20.18.0",
-    "npm": ">=10.8.0"
+    "node": ">=22.12.0",
+    "npm": ">=10.9.0"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest --passWithNoTests",
-    "tauri": "tauri"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tauri": "tauri",
+    "lint": "biome lint --diagnostic-level=error --max-diagnostics=100 src vite.config.ts",
+    "check:frontend": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --all-features --locked",
+    "check": "npm run check:frontend && npm run check:rust",
+    "bundle:linux": "bash scripts/package-linux.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.40.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@tauri-apps/cli": "^2.0.0",
-    "@types/node": "^22.10.0",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "~5.7.2",
-    "vite": "^6.0.5",
-    "vitest": "^3.0.5"
+    "@types/react-dom": "^19.2.6",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "~7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   }
 }

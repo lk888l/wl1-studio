@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct SerialPortOption {
     pub name: String,
     pub port_type: String,
+    pub vid: Option<u16>,
+    pub pid: Option<u16>,
     pub manufacturer: Option<String>,
     pub product: Option<String>,
     pub serial_number: Option<String>,

@@ -40,6 +40,8 @@ const geometryFields: Array<{
   { key: "wheelRadius", label: "轮半径", symbol: "R", min: 3, max: 40 },
 ];
 
+const KINEMATICS_FRAME_INTERVAL_MS = 1000 / 60;
+
 function range(start: number, end: number, step: number): number[] {
   const values: number[] = [];
   const first = Math.ceil(start / step) * step;
@@ -88,15 +90,22 @@ export function KinematicsPage() {
   const trajectory = useMemo(() => sampleLegTrajectory(geometry, thetaMin, thetaMax, 0.5), [geometry, thetaMax, thetaMin]);
   const solverTraceSegments = useMemo(() => splitTrajectory(solverTrajectory), [solverTrajectory]);
   const traceSegments = useMemo(() => splitTrajectory(trajectory), [trajectory]);
+  const mechanismEnvelope = useMemo(
+    () => solverTrajectory.flatMap((point) => {
+      const sampledPose = solveLegKinematics(geometry, point.theta);
+      return sampledPose ? [sampledPose.anchor, sampledPose.knee, sampledPose.crank, sampledPose.wheel] : [];
+    }),
+    [geometry, solverTrajectory],
+  );
 
   const bounds = useMemo(() => {
     const points: Point2D[] = [
+      ...mechanismEnvelope,
       ...solverTrajectory,
       ...trajectory,
       { x: geometry.anchorX, y: geometry.anchorY },
       { x: 0, y: 0 },
     ];
-    if (pose) points.push(pose.knee, pose.crank, pose.wheel);
     const xs = points.map((point) => point.x);
     const ys = points.map((point) => point.y);
     const padding = Math.max(24, geometry.wheelRadius + 14);
@@ -105,7 +114,7 @@ export function KinematicsPage() {
     const minY = Math.min(-45, ...ys) - padding;
     const maxY = Math.max(120, ...ys) + padding;
     return { minX, maxX, minY, maxY };
-  }, [geometry, pose, solverTrajectory, trajectory]);
+  }, [geometry, mechanismEnvelope, solverTrajectory, trajectory]);
 
   const viewBox = `${bounds.minX} ${bounds.minY} ${bounds.maxX - bounds.minX} ${bounds.maxY - bounds.minY}`;
   const xGrid = range(bounds.minX, bounds.maxX, 20);
@@ -125,11 +134,16 @@ export function KinematicsPage() {
   useEffect(() => {
     if (!playing) return;
     let animationFrame = 0;
-    let direction = theta >= thetaMax ? -1 : 1;
+    let direction = 1;
     let previousTime = performance.now();
     const tick = (time: number) => {
-      const elapsedSeconds = Math.min(0.05, (time - previousTime) / 1000);
-      previousTime = time;
+      const elapsedMilliseconds = time - previousTime;
+      if (elapsedMilliseconds < KINEMATICS_FRAME_INTERVAL_MS) {
+        animationFrame = requestAnimationFrame(tick);
+        return;
+      }
+      const elapsedSeconds = Math.min(0.05, elapsedMilliseconds / 1000);
+      previousTime = time - (elapsedMilliseconds % KINEMATICS_FRAME_INTERVAL_MS);
       setTheta((current) => {
         let next = current + direction * speed * elapsedSeconds;
         if (next >= thetaMax) {
@@ -203,7 +217,7 @@ export function KinematicsPage() {
         <section className="glass-card liquid-card kinematics-stage-card">
           <div className="kinematics-card-head">
             <div><span className="section-kicker">MECHANISM VIEW</span><h2>单腿机构</h2></div>
-            <div className="kinematics-legend" aria-label="图例">
+            <div className="kinematics-legend">
               <span><i className="is-drive" />驱动 CD</span>
               <span><i className="is-upper" />上连杆 AB</span>
               <span><i className="is-leg" />腿杆 BDW</span>
@@ -224,9 +238,6 @@ export function KinematicsPage() {
                   <stop offset=".72" stopColor="#222e43" />
                   <stop offset="1" stopColor="#111a2b" />
                 </radialGradient>
-                <filter id="kinematicsShadow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#385071" floodOpacity=".2" />
-                </filter>
               </defs>
 
               <g className="kinematics-grid">
@@ -242,7 +253,7 @@ export function KinematicsPage() {
               ))}
 
               {pose ? (
-                <g className="kinematics-mechanism" filter="url(#kinematicsShadow)">
+                <g className="kinematics-mechanism">
                   <line className="kinematics-ground" x1={bounds.minX} y1={pose.wheel.y + geometry.wheelRadius} x2={bounds.maxX} y2={pose.wheel.y + geometry.wheelRadius} />
                   <path className="kinematics-angle" d={`M 23 0 A 23 23 0 0 1 ${arcEnd.x} ${arcEnd.y}`} />
                   <text className="kinematics-angle-label" x={arcEnd.x + 5} y={arcEnd.y - 5}>θ</text>

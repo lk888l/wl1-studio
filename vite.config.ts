@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
-  envPrefix: ["VITE_", "TAURI_"],
+  envPrefix: ["VITE_"],
   server: {
     port: 1420,
     strictPort: true,
@@ -18,7 +18,6 @@ export default defineConfig({
   },
   build: {
     target: "chrome105",
-    minify: "esbuild",
     sourcemap: false,
   },
 });

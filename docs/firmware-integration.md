@@ -2,7 +2,7 @@
 
 本文面向上位机与 WL1 feature/framework 固件的联调。当前实现同时记录两个事实层：
 
-- 本地仓库：<code>D:\kk\Robot_Project\wheeled-legged_Robot\WL1\SoftWare\wheeled-legged_Robot-WL1</code>
+- 固件仓库：[lk888l/wheeled-legged_Robot-WL1](https://github.com/lk888l/wheeled-legged_Robot-WL1)；联调使用独立本地 checkout，个人绝对路径不写入产品文档
 - 已提交基线：<code>feature/framework@8f8eb82</code>
 - 本地工作树快照：2026-08-24，仍有多项未提交修改；包含持续演进中的控制安全与协议扩展，不能仅用 commit 标识
 - 命令文档：<code>car_firmware/docs/commands.md</code>

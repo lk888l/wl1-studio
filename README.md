@@ -2,14 +2,14 @@
 
 **简体中文** | [English](README.en.md)
 
-本仓库实现一套可扩展的多产品桌面上位机。软件启动后先进入产品首页，再进入对应产品的连接、遥测、调参和诊断工作台；当前首个且唯一接入的产品是 **WL1 轮腿小车**，其工作台名称为 **WL1 Studio（WL1 控制中心）**。项目参考 [hex-gui](https://github.com/hex-meow/hex-gui) 的 Tauri + React 技术路线，但不依赖额外仓库或 Git 子模块，并以更轻量的依赖、明亮的液态玻璃视觉和可替换通信层为目标。
+本仓库实现一套可扩展的多产品桌面上位机。软件启动后先进入产品首页，再进入对应产品的连接、遥测、调参和诊断工作台；当前首个且唯一完成设备协议接入的产品是 **WL1 轮腿小车**，其工作台名称为 **WL1 Studio（WL1 控制中心）**。口袋电子琴目前仅保留交互预览，生产构建默认关闭入口，不能被误认为真实硬件能力。项目采用 Tauri + React 技术路线，不依赖额外仓库或 Git 子模块，并以最小权限、可替换通信层和可审计发布流程为目标。
 
 > [!WARNING]
 > 轮腿机器人可能因错误参数、协议误判或通信异常突然运动。首次连接和每次调参前，请先阅读[安全指南](docs/safety.md)，架空驱动轮、准备物理急停，并确保人员远离运动范围。本软件不是安全控制器，不能替代固件侧限幅、看门狗和急停电路。
 
 ## 当前定位
 
-当前阶段优先建立“产品首页 + 独立产品工作台”的可扩展骨架。WL1 兼容层同时核对了 `feature/framework@8f8eb82` 的提交基线，以及 2026-08-24 本地固件工作树中尚未提交的控制/通信演进；界面仍可依靠 Mock 数据独立开发。未来新增产品时可接入自己的协议、页面与安全策略，WL1 固件变更则应集中在协议适配器，不需要重写页面。
+当前代码已经形成“产品首页 + 独立产品工作台 + Rust 设备网关”的跨平台骨架。WL1 兼容层同时核对了 `feature/framework@8f8eb82` 的提交基线，以及 2026-08-24 本地固件工作树中尚未提交的控制/通信演进；界面仍可依靠 Mock 数据独立开发。未来新增产品时应实现自己的协议、Transport、页面与安全策略，未完成后端和实机验证的工作台必须保持预览状态。
 
 当前首版已经覆盖的核心场景包括：
 
@@ -43,7 +43,7 @@
 - [Tauri 2](https://tauri.app/)：桌面外壳、串口访问和系统能力边界；
 - Rust：设备状态、命令校验、通信适配与遥测解析；
 - React 19 + TypeScript：前端页面和类型安全的调用封装；
-- Vite 6：开发服务器和前端构建；
+- Vite 8 + Biome：开发构建、静态检查和前端质量门禁；
 - Lucide React：轻量图标；
 - 原生 CSS：设计令牌、响应式布局和浅色液态玻璃效果。
 
@@ -51,38 +51,33 @@
 
 ## 环境要求
 
-Windows 开发环境建议具备：
+仓库固定并验证 Node.js 24.18、npm 11.16 与 Rust 1.95；无需全局安装 Tauri CLI。lock 文件用于可重复安装，首次下载 npm/crates 依赖需要联网。
 
-- Node.js 20.18 或更高版本；
-- npm 10.8 或更高版本；
-- Rust stable-msvc 工具链（通过 rustup 安装）；
-- Visual Studio 2022 C++ 桌面开发组件；
-- Microsoft Edge WebView2 Runtime。
+| 平台 | 当前状态 | 原生依赖 |
+|---|---|---|
+| Ubuntu 24.04 x86_64 | 已完成编译、测试、deb 与 AppImage 打包验证 | WebKitGTK 4.1、GTK 3、构建工具；详见 [Linux 指南](docs/linux.md) |
+| Windows x64 | 上一轮已编译验证，CI 持续检查 | Visual Studio 2022 C++、WebView2、stable-msvc |
+| macOS | 尚未建立签名和运行验证，不声明支持 | 后续需要 Xcode、Developer ID 与公证 |
 
-本仓库使用项目内的 `@tauri-apps/cli`，无需全局安装 Tauri CLI。首次安装前端和 Rust 依赖需要联网。
+Linux 系统依赖可用 `./scripts/bootstrap-ubuntu.sh --with-dialout` 安装；该脚本不会安装 Node 或 Rust，也不会以 root 启动应用。
 
 ## 快速开始
 
-```powershell
-# 安装前端依赖，并生成应提交的 package-lock.json
-npm install
+Ubuntu 24.04 首次准备见 [Linux 指南](docs/linux.md)，随后在各平台使用相同的项目命令：
 
-# 仅启动浏览器中的 Vite 前端；没有硬件时可使用 Mock 模式
-npm run dev
-
-# 启动完整 Tauri 桌面应用
+```bash
+npm ci
+npm run check
 npm run tauri dev
 ```
 
-提交前运行：
+只开发界面时运行 `npm run dev` 并使用 WL1 Mock。Linux 打包运行：
 
-```powershell
-npm run typecheck
-npm test
-npm run build
+```bash
+npm run bundle:linux
 ```
 
-如果尚未安装 Rust，前端仍可通过 `npm run dev` 开发；完整桌面构建必须先补齐 Rust stable-msvc。开发环境说明见[开发指南](docs/development.md)。
+deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互预览只在开发构建或显式设置 `VITE_ENABLE_PIANO_PREVIEW=true` 时开放；它不会访问真实硬件。完整开发流程见[开发指南](docs/development.md)，发布门禁见[发布规范](docs/release.md)。
 
 ## 项目结构
 
@@ -95,8 +90,12 @@ npm run build
 ├── docs/
 │   ├── architecture.md          # 分层、状态与版本策略
 │   ├── firmware-integration.md  # WL1 固件与传输接入约定
+│   ├── linux.md                 # Ubuntu 24.04 开发、运行与打包
+│   ├── release.md               # 跨平台发布、签名与门禁
+│   ├── security-audit.md        # 安全审计和残余风险
 │   ├── development.md           # 开发、测试和构建流程
 │   └── safety.md                # 实机操作与开发安全要求
+├── .github/workflows/           # 跨平台 CI 与定期依赖审计
 ├── package.json
 └── vite.config.ts
 ```
@@ -115,8 +114,12 @@ npm run build
 
 - [系统架构](docs/architecture.md)
 - [固件接入](docs/firmware-integration.md)
+- [Ubuntu 24.04 指南](docs/linux.md)
 - [开发指南](docs/development.md)
+- [发布规范](docs/release.md)
+- [安全审计](docs/security-audit.md)
 - [安全指南](docs/safety.md)
+- [漏洞披露政策](SECURITY.md)
 
 ## 上游与参考
 

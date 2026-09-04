@@ -2,14 +2,14 @@
 
 [简体中文](README.md) | **English**
 
-This repository implements an extensible, multi-product desktop control application. The application opens on a product home page and then enters the connection, telemetry, tuning, and diagnostics workspace for the selected product. The first and currently only integrated product is the **WL1 wheel-legged robot**, whose workspace is named **WL1 Studio (WL1 Control Center)**. The project follows the Tauri + React approach used by [hex-gui](https://github.com/hex-meow/hex-gui), while avoiding additional repositories or Git submodules and focusing on a smaller dependency set, a bright liquid-glass interface, and a replaceable communication layer.
+This repository implements an extensible, multi-product desktop control application. The application opens on a product home page and then enters the connection, telemetry, tuning, and diagnostics workspace for the selected product. The first and currently only product with a completed device-protocol integration is the **WL1 wheel-legged robot**. The pocket-piano workspace remains an interaction preview; production builds disable its entry by default so it cannot be mistaken for real hardware support. The project uses Tauri + React with least-privilege capabilities, a replaceable transport layer, and an auditable release workflow.
 
 > [!WARNING]
 > A wheel-legged robot can move suddenly because of incorrect parameters, protocol misidentification, or communication faults. Before the first connection and every tuning session, read the [Safety Guide](docs/safety.md), lift the drive wheels off the ground, prepare a physical emergency stop, and keep people outside the motion area. This software is not a safety controller and cannot replace firmware-side limits, watchdogs, or emergency-stop circuitry.
 
 ## Current scope
 
-The current phase focuses on an extensible “product home + isolated product workspace” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. The interface can still be developed independently with Mock data. Future products can provide their own protocol, pages, and safety policy; future WL1 firmware changes should remain concentrated in the protocol adapter rather than requiring page rewrites.
+The codebase now has a cross-platform “product home + isolated workspace + Rust device gateway” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. Future products should provide their own protocol, Transport, pages, and safety policy; a workspace without a backend and real-hardware validation must remain a preview.
 
 The first release covers these core scenarios:
 
@@ -42,7 +42,7 @@ See the [Firmware Integration Guide](docs/firmware-integration.md) for the compl
 - [Tauri 2](https://tauri.app/): desktop shell, serial access, and system capability boundaries;
 - Rust: device state, command validation, communication adapters, and telemetry parsing;
 - React 19 + TypeScript: frontend pages and type-safe command wrappers;
-- Vite 6: development server and frontend build;
+- Vite 8 + Biome: development builds, static analysis, and frontend quality gates;
 - Lucide React: lightweight icons;
 - native CSS: design tokens, responsive layout, and the bright liquid-glass appearance.
 
@@ -50,38 +50,33 @@ The project deliberately avoids a large UI component library. The liquid-glass e
 
 ## Requirements
 
-The recommended Windows development environment includes:
+The verified toolchain is Node.js 24.18, npm 11.16, and Rust 1.95. The repository-local Tauri CLI is used; no global CLI is required. Lockfiles provide repeatable installs, while the first npm/crates download requires network access.
 
-- Node.js 20.18 or newer;
-- npm 10.8 or newer;
-- the Rust stable-msvc toolchain installed through rustup;
-- Visual Studio 2022 Desktop development with C++;
-- Microsoft Edge WebView2 Runtime.
+| Platform | Status | Native requirements |
+|---|---|---|
+| Ubuntu 24.04 x86_64 | Compilation, tests, deb, and AppImage packaging verified | WebKitGTK 4.1, GTK 3, and build tools; see the [Linux guide](docs/linux.md) |
+| Windows x64 | Previously compiled and verified; guarded by CI | Visual Studio 2022 C++, WebView2, stable-msvc |
+| macOS | Signing and runtime validation not established; unsupported | Xcode, Developer ID, and notarization are future work |
 
-The repository uses its project-local `@tauri-apps/cli` package; a global Tauri CLI installation is unnecessary. The initial installation of frontend and Rust dependencies requires network access.
+On Ubuntu, `./scripts/bootstrap-ubuntu.sh --with-dialout` installs system dependencies. It does not install Node/Rust and never launches the app as root.
 
 ## Quick start
 
-```powershell
-# Install frontend dependencies and generate the committed package-lock.json
-npm install
+Prepare Ubuntu once with the [Linux guide](docs/linux.md), then use the same project commands on every platform:
 
-# Start only the Vite frontend in a browser; use Mock mode without hardware
-npm run dev
-
-# Start the complete Tauri desktop application
+```bash
+npm ci
+npm run check
 npm run tauri dev
 ```
 
-Run these checks before committing:
+For frontend-only work, run `npm run dev` and use the WL1 Mock. Build Linux packages with:
 
-```powershell
-npm run typecheck
-npm test
-npm run build
+```bash
+npm run bundle:linux
 ```
 
-If Rust is not installed yet, the frontend can still be developed with `npm run dev`. A complete desktop build requires Rust stable-msvc. See the [Development Guide](docs/development.md) for environment details.
+deb and AppImage artifacts are written below `src-tauri/target/release/bundle/`. The piano interaction preview is available only in development builds or when `VITE_ENABLE_PIANO_PREVIEW=true` is explicitly set; it never accesses hardware. See the [Development Guide](docs/development.md) and [Release Guide](docs/release.md).
 
 ## Project layout
 
@@ -94,8 +89,12 @@ If Rust is not installed yet, the frontend can still be developed with `npm run 
 ├── docs/
 │   ├── architecture.md            # Layers, state, and version strategy
 │   ├── firmware-integration.md    # WL1 firmware and transport integration contract
+│   ├── linux.md                   # Ubuntu development, runtime, and packaging
+│   ├── release.md                 # Cross-platform release and signing gates
+│   ├── security-audit.md          # Security findings and residual risks
 │   ├── development.md             # Development, testing, and build workflow
 │   └── safety.md                  # Real-device operation and development safety
+├── .github/workflows/             # Cross-platform CI and dependency audits
 ├── package.json
 └── vite.config.ts
 ```
@@ -116,8 +115,12 @@ The supporting guides are currently written in Simplified Chinese:
 
 - [System architecture](docs/architecture.md)
 - [Firmware integration](docs/firmware-integration.md)
+- [Ubuntu 24.04 guide](docs/linux.md)
 - [Development guide](docs/development.md)
+- [Release guide](docs/release.md)
+- [Security audit](docs/security-audit.md)
 - [Safety guide](docs/safety.md)
+- [Vulnerability disclosure policy](SECURITY.md)
 
 ## Upstream and references
 

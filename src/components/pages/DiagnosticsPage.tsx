@@ -60,6 +60,7 @@ export function DiagnosticsPage({
 
   useEffect(() => {
     const element = scrollRef.current;
+    void visibleEntries.length;
     if (element) element.scrollTop = element.scrollHeight;
   }, [visibleEntries.length]);
 
@@ -114,7 +115,7 @@ export function DiagnosticsPage({
             <div className="console-filters">
               {(["all", "rx", "tx", "system"] as const).map((item) => <button key={item} type="button" className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item === "all" ? "全部" : directionLabel[item]}</button>)}
             </div>
-            <label className="console-search"><Search size={15} /><input value={query} placeholder="过滤日志" onChange={(event) => setQuery(event.target.value)} /></label>
+            <div className="console-search"><Search size={15} aria-hidden="true" /><input aria-label="过滤日志" value={query} placeholder="过滤日志" onChange={(event) => setQuery(event.target.value)} /></div>
             <button className="icon-button" type="button" aria-label="复制日志" onClick={() => void copyConsole()}><Clipboard size={17} /></button>
             <button className="icon-button" type="button" aria-label="清空日志" onClick={onClear}><Eraser size={17} /></button>
           </header>

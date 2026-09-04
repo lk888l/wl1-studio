@@ -25,12 +25,14 @@ pub fn unix_millis() -> u64 {
 }
 
 pub struct AppState {
+    lifecycle: Mutex<()>,
     session: Mutex<Option<DeviceSession>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            lifecycle: Mutex::new(()),
             session: Mutex::new(None),
         }
     }
@@ -52,7 +54,11 @@ impl AppState {
         baud_rate: u32,
         writes_unlocked: bool,
     ) -> Result<ConnectionSnapshot, String> {
-        self.disconnect(None)?;
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "设备会话生命周期锁已损坏")?;
+        self.disconnect_current(None)?;
         let transport = Box::new(SerialTransport::open(port_name, baud_rate)?);
         let session = DeviceSession::from_serial(app, transport, baud_rate, writes_unlocked)?;
         let snapshot = session.snapshot();
@@ -61,7 +67,11 @@ impl AppState {
     }
 
     pub fn connect_mock(&self, app: AppHandle) -> Result<ConnectionSnapshot, String> {
-        self.disconnect(None)?;
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "设备会话生命周期锁已损坏")?;
+        self.disconnect_current(None)?;
         let session = DeviceSession::from_mock(app)?;
         let snapshot = session.snapshot();
         *self.session.lock().map_err(|_| "设备会话状态已损坏")? = Some(session);
@@ -69,6 +79,14 @@ impl AppState {
     }
 
     pub fn disconnect(&self, expected_session_id: Option<u64>) -> Result<(), String> {
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "设备会话生命周期锁已损坏")?;
+        self.disconnect_current(expected_session_id)
+    }
+
+    fn disconnect_current(&self, expected_session_id: Option<u64>) -> Result<(), String> {
         let session = {
             let mut guard = self.session.lock().map_err(|_| "设备会话状态已损坏")?;
             if let (Some(expected), Some(current)) = (expected_session_id, guard.as_ref()) {
@@ -195,6 +213,7 @@ struct DeviceSession {
     reader_thread: Option<JoinHandle<()>>,
     last_motion_height: SharedMotionHeight,
     writes_unlocked: bool,
+    shutdown_started: bool,
 }
 
 impl DeviceSession {
@@ -248,6 +267,7 @@ impl DeviceSession {
             reader_thread: Some(reader_thread),
             last_motion_height,
             writes_unlocked,
+            shutdown_started: false,
         })
     }
 
@@ -286,11 +306,12 @@ impl DeviceSession {
             reader_thread: Some(reader_thread),
             last_motion_height: Arc::new(Mutex::new(None)),
             writes_unlocked: true,
+            shutdown_started: false,
         })
     }
 
     fn snapshot(&self) -> ConnectionSnapshot {
-        let alive = self.alive.load(Ordering::Relaxed);
+        let alive = self.alive.load(Ordering::Acquire);
         ConnectionSnapshot {
             mode: if alive { self.mode } else { "disconnected" },
             label: if alive {
@@ -314,7 +335,7 @@ impl DeviceSession {
     }
 
     fn send_command(&mut self, command: &str, attempted_height: Option<f64>) -> Result<(), String> {
-        if !self.alive.load(Ordering::Relaxed) {
+        if !self.alive.load(Ordering::Acquire) {
             return Err("设备连接已中断，请断开后重新连接".into());
         }
         let result = match &mut self.writer {
@@ -338,7 +359,7 @@ impl DeviceSession {
             }
         };
         if result.is_err() {
-            self.alive.store(false, Ordering::Relaxed);
+            self.alive.store(false, Ordering::Release);
             self.best_effort_safety();
         }
         result
@@ -373,9 +394,13 @@ impl DeviceSession {
     }
 
     fn shutdown(&mut self) {
-        self.best_effort_safety();
+        if self.shutdown_started {
+            return;
+        }
+        self.shutdown_started = true;
         self.stop.store(true, Ordering::Relaxed);
-        self.alive.store(false, Ordering::Relaxed);
+        self.alive.store(false, Ordering::Release);
+        self.best_effort_safety();
         if let Some(handle) = self.reader_thread.take() {
             let _ = handle.join();
         }
@@ -391,7 +416,10 @@ impl DeviceSession {
 impl Drop for DeviceSession {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        self.alive.store(false, Ordering::Relaxed);
+        self.alive.store(false, Ordering::Release);
+        if !self.shutdown_started {
+            self.best_effort_safety();
+        }
         if let Some(handle) = self.reader_thread.take() {
             let _ = handle.join();
         }
@@ -428,6 +456,7 @@ fn update_mock_control(control: &Mutex<MockControl>, command: &str) {
 
 const SERIAL_PENDING_LIMIT: usize = 4096;
 const TELEMETRY_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+const TELEMETRY_WEBVIEW_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONSECUTIVE_UNPARSED_LINES: usize = 64;
 
 #[derive(Default)]
@@ -498,7 +527,7 @@ fn write_serial_command(
     // The reader marks the session dead before waiting for this mutex. Recheck
     // inside the write critical section so a queued non-zero R/show*-y cannot
     // overtake its safety commands or replace the remembered safe height.
-    if !alive.load(Ordering::Relaxed) {
+    if !alive.load(Ordering::Acquire) {
         return Err("设备连接已中断，请断开后重新连接".into());
     }
     if let Some(height) = attempted_height {
@@ -543,7 +572,7 @@ fn fail_serial_reader(
     session_id: u64,
     reason: String,
 ) {
-    alive.store(false, Ordering::Relaxed);
+    alive.store(false, Ordering::Release);
     // Safety cleanup must not depend on a responsive WebView receiving the
     // disconnect event. The UI event only updates presentation/session state.
     best_effort_serial_safety(writer, last_motion_height);
@@ -590,7 +619,7 @@ fn serial_reader_loop(
     let mut chunk = [0_u8; 256];
     let mut pending = Vec::<u8>::with_capacity(512);
     let mut last_telemetry_emit = Instant::now()
-        .checked_sub(Duration::from_millis(40))
+        .checked_sub(TELEMETRY_WEBVIEW_INTERVAL)
         .unwrap_or_else(Instant::now);
     let mut telemetry_health = TelemetryHealth::default();
 
@@ -620,9 +649,9 @@ fn serial_reader_loop(
                     let decoded_at = unix_millis();
                     if let Some(mut frame) = codec.apply_update(&update, decoded_at) {
                         // Decode every line so the cache stays current, but cap
-                        // WebView events near 30 Hz. Raw structured telemetry is
+                        // WebView events at 20 Hz. Raw structured telemetry is
                         // intentionally not duplicated into the React console.
-                        if last_telemetry_emit.elapsed() >= Duration::from_millis(33) {
+                        if last_telemetry_emit.elapsed() >= TELEMETRY_WEBVIEW_INTERVAL {
                             frame.session_id = session_id;
                             frame.timestamp = decoded_at;
                             let _ = app.emit("wl1://telemetry", frame);
@@ -793,6 +822,7 @@ mod tests {
             reader_thread: None,
             last_motion_height: Arc::new(Mutex::new(None)),
             writes_unlocked: true,
+            shutdown_started: false,
         }
     }
 
@@ -819,6 +849,19 @@ mod tests {
                 "showimu -n",
                 "showrpm -n",
             ]
+        );
+    }
+    #[test]
+    fn drop_performs_backend_safety_when_shutdown_was_skipped() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let session = failing_serial_session(Arc::clone(&writes));
+        *session.last_motion_height.lock().unwrap() = Some(60.0);
+
+        drop(session);
+
+        assert_eq!(
+            *writes.lock().unwrap(),
+            ["R 0.0 0.0 0.0 60.0", "showimu -n", "showrpm -n",]
         );
     }
 

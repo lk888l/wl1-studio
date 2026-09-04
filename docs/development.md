@@ -1,31 +1,29 @@
 # 开发指南
 
-本文说明 WL1 Studio（WL1 控制中心）的本地开发、测试和构建约定。默认使用 Windows、npm 与 Rust stable-msvc；所有文档和用户界面优先使用简体中文。
+本文说明 WL1 Studio（WL1 控制中心）的本地开发、测试和构建约定。Ubuntu 24.04 与 Windows 都是 CI 目标；所有文档和用户界面优先使用简体中文。Linux 系统准备和排障另见 [linux.md](linux.md)。
 
 ## 前置环境
 
 ### Node.js
 
-- Node.js：20.18 或更高；
-- npm：10.8 或更高；
-- 不要求全局安装 Vite、Vitest 或 Tauri CLI。
+- Node.js：使用 `.node-version` 固定的 24.18；
+- npm：使用 `package.json#packageManager` 固定的 11.16；
+- 不要求全局安装 Vite、Vitest、Biome 或 Tauri CLI。
 
 验证：
 
-```powershell
+```bash
 node --version
 npm --version
 ```
 
-### Rust 与 Windows 组件
+### Rust 与平台组件
 
-- 通过 rustup 安装 stable-msvc 工具链；
-- Visual Studio 2022 的“使用 C++ 的桌面开发”组件；
-- Microsoft Edge WebView2 Runtime。
+`rust-toolchain.toml` 固定 Rust、rustfmt 与 Clippy。Windows 需要 Visual Studio 2022“使用 C++ 的桌面开发”和 WebView2；Ubuntu 24.04 需要 WebKitGTK 4.1/GTK 3 等系统包，可运行 `./scripts/bootstrap-ubuntu.sh` 安装。
 
 验证：
 
-```powershell
+```bash
 rustup show active-toolchain
 rustc --version
 cargo --version
@@ -35,11 +33,11 @@ cargo --version
 
 ## 安装依赖
 
-```powershell
-npm install
+```bash
+npm ci
 ```
 
-首次安装需要访问 npm registry 和 crates.io。`npm install` 会生成 `package-lock.json`；应用项目应提交该文件以便复现依赖，不要手工编辑锁文件。
+日常构建必须使用 `npm ci` 和已提交的 `package-lock.json`。只有主动升级依赖时才运行 `npm install` 并评审 lock diff。首次安装需要访问 npm registry 和 crates.io；`.npmrc` 默认禁用依赖生命周期脚本，新增需要脚本的依赖必须先审查。
 
 本项目不要求 clone 额外协议仓库，也不使用 Git submodule。未来如需拆分协议 crate，优先放入当前仓库的 Cargo workspace，并使用仓库内相对路径。
 
@@ -49,19 +47,17 @@ npm install
 |---|---|
 | `npm run dev` | 仅启动 Vite 前端，适合 Mock 模式和样式开发 |
 | `npm run tauri dev` | 启动完整桌面应用与热更新 |
+| `npm run lint` | 执行 Biome 错误级静态检查 |
 | `npm run typecheck` | 对前端和 Vite 配置执行严格 TypeScript 检查 |
-| `npm test` | 运行一次 Vitest 测试；当前允许无测试文件 |
+| `npm test` | 运行一次 Vitest 测试 |
 | `npm run test:watch` | 监听模式运行 Vitest |
 | `npm run build` | TypeScript 检查后生成前端 `dist/` |
-| `npm run tauri build` | 构建桌面安装包/可执行文件 |
+| `npm run check:frontend` | 前端 lint、类型、测试和生产构建 |
+| `npm run check:rust` | Rust 格式、Clippy 和测试（均使用 lock） |
+| `npm run check` | 本地完整质量门禁 |
+| `npm run bundle:linux` | 在 Linux 原生构建 deb 与 AppImage |
 
-Rust 侧提交前还应运行：
-
-```powershell
-cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml --all-features
-```
+Rust 单独检查可直接运行 `npm run check:rust`。等价命令全部带 `--locked`，避免检查时静默改动依赖解析结果。
 
 ## 推荐开发流程
 
@@ -112,7 +108,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-features
 - 后台任务必须可取消，断开后不得残留读取或重连任务；
 - 断开与线程回收必须在会话锁之外完成；当前同步写入为保持顺序会短暂持有会话锁，并由 40 ms 串口超时限界，后续异步传输应拆分独立写队列；
 - 错误保留稳定分类与诊断上下文，面向用户的描述由 UI 本地化；
-- `unsafe` 默认禁止；确有必要时需说明不变量并增加针对性测试；
+- crate 使用 `#![forbid(unsafe_code)]`；确需原生 unsafe 时必须先隔离为独立、经审计的边界 crate；
 - Tauri 权限采用最小集合，不开启通用 shell。
 
 ## 协议开发
@@ -168,23 +164,15 @@ Mock 数据应可复现，测试中避免依赖真实时间和随机数。模拟
 
 ## 构建与发布
 
-前端产物由 Vite 生成到 `dist/`，Tauri 构建结果位于 `src-tauri/target/`。这些目录均不提交版本库。
+前端产物位于 `dist/`，Tauri 产物位于 `src-tauri/target/`，均不提交。Ubuntu 使用 `npm run bundle:linux`；Windows 构建由目标平台原生执行。
 
-发布前至少检查：
-
-- 前端与 Rust 全部检查通过；
-- 应用版本、Tauri 配置与发布标签一致；
-- 全新环境能依据 lock 文件构建；
-- 安装包不包含测试串口、个人路径或原始硬件记录；
-- Windows WebView2 策略和最低系统版本已验证；
-- 未签名构建清楚标注，正式发布再配置代码签名；
-- Release Notes 明确支持的固件 commit/版本和已知限制。
+CI 会在 Ubuntu/Windows 执行质量检查，并在 Ubuntu 构建 deb/AppImage 冒烟产物。CI 产物仍是未签名验证包，不能直接当作正式发行。版本同步、安装测试、签名、公证、校验和、SBOM 与实机发布门禁统一遵循[发布规范](release.md)，残余风险见[安全审计](security-audit.md)。
 
 ## 常见问题
 
 ### `cargo` 或 `rustc` 找不到
 
-安装 rustup 的 stable-msvc 工具链后重新打开终端，确认 `%USERPROFILE%\.cargo\bin` 已加入 PATH。
+通过 rustup 安装工具链后重新打开终端。仓库会自动选择 `rust-toolchain.toml` 中的版本；Windows 检查用户 Cargo bin 目录，Linux 通常检查用户环境中的 Cargo bin 目录。
 
 ### Tauri 可以编译但窗口空白
 
@@ -192,7 +180,7 @@ Mock 数据应可复现，测试中避免依赖真实时间和随机数。模拟
 
 ### 端口无法打开
 
-检查端口是否被串口助手或另一份应用占用、USB 驱动是否正常、设备是否重新枚举为其他 COM 号。不要通过管理员权限掩盖端口身份或驱动问题。
+检查端口是否被其他进程占用、USB 驱动是否正常、设备是否在拔插后改变名称。Linux 运行 `./scripts/check-linux.sh` 并确认当前用户属于 `dialout`；不要用 root、管理员权限或全局 0666 规则掩盖身份和权限问题。
 
 ### 串口能收到文本但没有遥测
 

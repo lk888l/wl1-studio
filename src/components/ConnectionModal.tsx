@@ -11,6 +11,14 @@ const SERIAL_WRITE_CONFIRMATIONS = [
   "目标设备已确认运行本工具复核的 Legacy WL1 双基线兼容协议（固件身份无法自动握手）",
 ] as const;
 
+function formatPortDetails(port: SerialPortOption): string {
+  const identity = port.product ?? port.manufacturer ?? port.portType;
+  if (port.vid === undefined || port.pid === undefined) return identity;
+
+  const usbId = `${port.vid.toString(16).padStart(4, "0")}:${port.pid.toString(16).padStart(4, "0")}`.toUpperCase();
+  return `${identity} · VID:PID ${usbId}`;
+}
+
 interface ConnectionModalProps {
   open: boolean;
   connection: ConnectionSnapshot;
@@ -62,7 +70,7 @@ export function ConnectionModal({
   const connected = connection.mode !== "disconnected";
   const writesUnlocked = safetyChecks.every(Boolean);
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !loading && onClose()}>
+    <div className="modal-backdrop">
       <section className="connection-modal glass-panel" role="dialog" aria-modal="true" aria-labelledby="connection-title">
         <header className="modal-header">
           <div>
@@ -77,7 +85,7 @@ export function ConnectionModal({
           <div className="connected-device-card">
             <div className="connected-device-icon"><Check size={24} /></div>
             <div><small>已建立连接</small><strong>{connection.label}</strong><span>{connection.mode === "mock" ? "后端仿真设备 · 写入已解锁" : `${connection.baudRate ?? 115200} baud · ${connection.writesUnlocked ? "写入已解锁" : "只读"}`}</span></div>
-            <span className="signal-bars" aria-label="连接正常"><i /><i /><i /><i /></span>
+            <span className="signal-bars" role="img" aria-label="连接正常"><i /><i /><i /><i /></span>
           </div>
         ) : (
           <>
@@ -94,13 +102,13 @@ export function ConnectionModal({
             ) : (
               <div className="serial-picker">
                 <div className="field-row field-row--heading">
-                  <label>可用串口</label>
+                  <span>可用串口</span>
                   <button className="text-button" type="button" disabled={loading} onClick={onRefresh}><RefreshCw size={15} />刷新</button>
                 </div>
                 <div className="port-list">
                   {ports.map((port) => (
                     <button key={port.name} type="button" className={`port-option${selectedPort === port.name ? " is-selected" : ""}`} onClick={() => setSelectedPort(port.name)}>
-                      <Usb size={19} /><span><strong>{port.name}</strong><small>{port.product ?? port.manufacturer ?? port.portType}</small></span>{selectedPort === port.name && <Check size={17} />}
+                      <Usb size={19} /><span><strong>{port.name}</strong><small>{formatPortDetails(port)}</small></span>{selectedPort === port.name && <Check size={17} />}
                     </button>
                   ))}
                   {!loading && ports.length === 0 && <div className="empty-list">{isTauriRuntime() ? "未发现串口，请检查数据线与驱动。" : "浏览器无法枚举本机串口，请使用 Mock 模式。"}</div>}
