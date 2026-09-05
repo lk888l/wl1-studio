@@ -8,6 +8,25 @@ import {
 } from "./protocol";
 
 describe("WL1 文本协议", () => {
+  it("空 IMU 字段不能被转换成有效的零值", () => {
+    for (const line of [",,", "1,,2", " ,1,2,a=1,ok=1"]) {
+      expect(parseFirmwareLine(line).type).toBe("log");
+    }
+  });
+
+  it("遥控器只支持参数白名单，载荷需留出 NUL 字节", () => {
+    for (const command of ["anglepid -p 60", "velocitypid -i 0.01", "rollpid -p -0.5", "differpid -d 0.1", "anglebias 12", "anglepid auto"]) {
+      expect(validateFirmwareCommand(command, "remote")).toBeNull();
+    }
+    expect(validateFirmwareCommand("legheight 60", "remote")).toContain("实体摇杆");
+    expect(validateFirmwareCommand("showimu -y", "remote")).toContain("不允许");
+    const boundary = `anglebias ${"0".repeat(20)}12`;
+    expect(commandByteLength(boundary)).toBe(32);
+    expect(validateFirmwareCommand(boundary, "robot")).toBeNull();
+    expect(validateFirmwareCommand(boundary, "remote")).toContain("31 字节");
+    expect(validateFirmwareCommand(boundary.slice(0, 10) + boundary.slice(11), "remote")).toBeNull();
+  });
+
   it("解析 IMU 三元组", () => {
     expect(parseFirmwareLine("-01.250,002.500,180.000\r\n")).toEqual({
       type: "imu",

@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { validateFirmwareCommand } from "../../lib/protocol";
+import { commandByteLength, validateFirmwareCommand } from "../../lib/protocol";
+import { isRemoteConnection } from "../../lib/connection";
 import type { ConnectionSnapshot, ConsoleDirection, ConsoleEntry } from "../../types";
 
 type ConsoleFilter = "all" | ConsoleDirection;
@@ -52,7 +53,8 @@ export function DiagnosticsPage({
   const [notice, setNotice] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const connected = connection.mode !== "disconnected";
-  const validation = command ? validateFirmwareCommand(command) : null;
+  const remote = isRemoteConnection(connection);
+  const validation = command ? validateFirmwareCommand(command, connection.connectionTarget ?? "robot") : null;
   const visibleEntries = useMemo(() => entries.filter((entry) => {
     if (filter !== "all" && entry.direction !== filter) return false;
     return !query || entry.text.toLowerCase().includes(query.toLowerCase());
@@ -65,7 +67,8 @@ export function DiagnosticsPage({
   }, [visibleEntries.length]);
 
   const send = async (value = command): Promise<void> => {
-    const error = validateFirmwareCommand(value);
+    if (!connected || !writesUnlocked || busy) return;
+    const error = validateFirmwareCommand(value, connection.connectionTarget ?? "robot");
     if (error) {
       setNotice(error);
       return;
@@ -75,6 +78,7 @@ export function DiagnosticsPage({
     try {
       await onSend(value.trim());
       setCommand("");
+      if (remote) setNotice("已写入遥控器串口；小车是否收到或执行需现场确认。");
     } catch (reason) {
       setNotice(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -83,6 +87,7 @@ export function DiagnosticsPage({
   };
 
   const toggleTelemetry = async (): Promise<void> => {
+    if (!connected || remote || busy) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -97,16 +102,22 @@ export function DiagnosticsPage({
 
   const copyConsole = async (): Promise<void> => {
     const text = visibleEntries.map((entry) => `${new Date(entry.timestamp).toISOString()} ${directionLabel[entry.direction]} ${entry.text}`).join("\n");
-    await navigator.clipboard.writeText(text);
-    setNotice("当前筛选结果已复制到剪贴板。");
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice("当前筛选结果已复制到剪贴板。");
+    } catch {
+      setNotice("复制失败，请检查剪贴板权限后重试。");
+    }
   };
 
   return (
     <div className="page-stack diagnostics-page">
       <section className="page-heading">
-        <div><h1>诊断终端</h1><p>查看串口日志，并发送安全白名单内的单条 ASCII 命令。</p></div>
-        <button className={connected ? "connection-button is-online" : "connection-button"} type="button" onClick={onConnectionOpen}><span className="status-orb" /><div><small>{connected ? "CONNECTED" : "OFFLINE"}</small><strong>{connection.label}</strong></div></button>
+        <div><h1>诊断终端</h1><p>{remote ? "查看遥控器串口日志，并无线下发单条参数命令。" : "查看串口日志，并发送安全白名单内的单条 ASCII 命令。"}</p></div>
+        <button className={connected ? "connection-button is-online" : "connection-button"} type="button" onClick={onConnectionOpen}><span className="status-orb" /><div><small>{remote ? "REMOTE SERIAL OPEN" : connected ? "CONNECTED" : "OFFLINE"}</small><strong>{connection.label}</strong></div></button>
       </section>
+
+      {remote && <div className="inline-notice"><RadioTower size={18} /><span>TX 表示电脑已写入遥控器串口。遥控器的无线投递日志也不代表小车执行确认；当前桥接不提供小车遥测、参数回读或运动控制。</span></div>}
 
       <div className="diagnostics-layout">
         <section className="terminal-card glass-card">
@@ -128,9 +139,9 @@ export function DiagnosticsPage({
           </div>
 
           <form className="command-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span>&gt;</span><input value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? "输入单条固件命令，例如 legheight 44.5" : "只读连接已锁定命令发送"} disabled={!writesUnlocked || busy} onChange={(event) => setCommand(event.target.value)} />
-            <small className={validation ? "is-error" : ""}>{command.trim().length}/32</small>
-            <button className="primary-button" type="submit" disabled={!writesUnlocked || busy || !command.trim() || Boolean(validation)}><Send size={16} />发送</button>
+            <span>&gt;</span><input aria-label="固件命令" value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? remote ? "例如 anglebias 12.6（不含换行）" : "输入单条固件命令，例如 legheight 44.5" : "只读连接已锁定命令发送"} disabled={!connected || !writesUnlocked || busy} onChange={(event) => setCommand(event.target.value)} />
+            <small className={validation ? "is-error" : ""}>{commandByteLength(command)}/{remote ? 31 : 32}</small>
+            <button className="primary-button" type="submit" disabled={!connected || !writesUnlocked || busy || !command.trim() || Boolean(validation)}><Send size={16} />发送</button>
           </form>
           {validation && <div className="composer-error">{validation}</div>}
         </section>
@@ -138,19 +149,19 @@ export function DiagnosticsPage({
         <aside className="diagnostics-sidebar">
           <section className="glass-card diagnostic-control">
             <div className="section-title-row"><div><span className="section-kicker">TELEMETRY</span><h2>遥测总开关</h2></div><RadioTower size={19} /></div>
-            <p>当前 Rust 契约将 IMU 与 RPM 作为一组启停；待后端 DTO 支持后再拆分通道。</p>
-            <button className={telemetryEnabled ? "telemetry-toggle is-active" : "telemetry-toggle"} type="button" disabled={!connected || busy} onClick={() => void toggleTelemetry()}>
-              {telemetryEnabled ? <CircleStop size={19} /> : <RadioTower size={19} />}<span><strong>{telemetryEnabled ? "停止遥测" : "开启遥测"}</strong><small>{telemetryEnabled ? "本会话已请求开启（无 ACK）" : "本会话未请求开启 / 已请求停止（未确认）"}</small></span><i />
+            <p>{remote ? "遥控器无线桥接仅支持参数下发；查看 IMU 和 RPM 请切换为直连小车。" : "一起开启或停止姿态与轮速遥测。固件不返回 ACK，请以收到的实时数据为准。"}</p>
+            <button className={!remote && telemetryEnabled ? "telemetry-toggle is-active" : "telemetry-toggle"} type="button" disabled={!connected || remote || busy} onClick={() => void toggleTelemetry()}>
+              {!remote && telemetryEnabled ? <CircleStop size={19} /> : <RadioTower size={19} />}<span><strong>{remote ? "无线模式不支持遥测" : telemetryEnabled ? "停止遥测" : "开启遥测"}</strong><small>{remote ? "需要直连小车串口" : telemetryEnabled ? "本会话已请求开启（无 ACK）" : "本会话未请求开启 / 已请求停止（未确认）"}</small></span><i />
             </button>
           </section>
 
           <section className="glass-card quick-commands">
             <div className="section-title-row"><div><span className="section-kicker">SHORTCUTS</span><h2>常用命令</h2></div></div>
-            {quickCommands.map((item) => <button type="button" key={item} disabled={!writesUnlocked || busy} onClick={() => void send(item)}><code>{item}</code><Send size={14} /></button>)}
+            {quickCommands.filter((item) => !remote || !item.startsWith("legheight ")).map((item) => <button type="button" key={item} disabled={!connected || !writesUnlocked || busy} onClick={() => void send(item)}><code>{item}</code><Send size={14} /></button>)}
           </section>
 
           <section className="glass-card protocol-facts">
-            <div><span>传输</span><strong>115200 · 8-N-1</strong></div><div><span>协议</span><strong>Legacy ASCII</strong></div><div><span>命令 ACK</span><strong className="text-warning">不支持</strong></div><div><span>队列</span><strong>4 × 32 bytes</strong></div>
+            <div><span>传输</span><strong>115200 · 8-N-1</strong></div><div><span>目标</span><strong>{remote ? "遥控器串口桥接" : "小车本体 / 仿真"}</strong></div><div><span>小车执行 ACK</span><strong className="text-warning">不支持</strong></div><div><span>{remote ? "命令上限" : "队列"}</span><strong>{remote ? "31 bytes + 换行" : "4 × 32 bytes"}</strong></div>
           </section>
         </aside>
       </div>

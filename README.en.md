@@ -9,6 +9,8 @@ This repository implements an extensible, multi-product desktop control applicat
 
 ## Current scope
 
+The WL1 workspace now offers **Direct robot** and **Tune through remote** serial targets. Remote tuning forwards PID and attitude-bias commands through NRF24L01 and requires the companion serial-bridge firmware; the original remote firmware does not start UART RX. It has no robot telemetry or parameter-execution acknowledgements, and physical joysticks retain motion and height control. See the [remote tuning guide](docs/remote-tuning.md). The Legacy telemetry and idle-framing details below apply to direct robot connections.
+
 The codebase now has a cross-platform “product home + isolated workspace + Rust device gateway” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. Future products should provide their own protocol, Transport, pages, and safety policy; a workspace without a backend and real-hardware validation must remain a preview.
 
 The first release covers these core scenarios:

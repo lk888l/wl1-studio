@@ -1,4 +1,4 @@
-use crate::types::{MotionTargetRequest, TelemetryFrame};
+use crate::types::{ConnectionTarget, MotionTargetRequest, TelemetryFrame};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FirmwareUpdate {
@@ -204,6 +204,22 @@ pub fn validate_text_command(command: &str) -> Result<ValidatedCommand, String> 
     })
 }
 
+pub fn validate_text_command_for_target(
+    command: &str,
+    target: ConnectionTarget,
+) -> Result<ValidatedCommand, String> {
+    let validated = validate_text_command(command)?;
+    if target == ConnectionTarget::Remote {
+        if validated.leg_height.is_some() {
+            return Err("遥控器模式的腿高由实体摇杆控制；无线调参仅支持 PID 与俯仰偏置".into());
+        }
+        if validated.text.len() > 31 {
+            return Err("无线参数命令最多 31 字节，NRF24L01 帧需保留结尾空字节".into());
+        }
+    }
+    Ok(validated)
+}
+
 pub fn validate_motion_target(
     target: &MotionTargetRequest,
 ) -> Result<ValidatedMotionCommand, String> {
@@ -274,6 +290,38 @@ fn validate_pid(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_commands_preserve_joystick_ownership_and_radio_frame_limit() {
+        for command in [
+            "anglepid -p 65",
+            "anglepid auto",
+            "anglebias auto",
+            "anglebias 12",
+            "velocitypid -i 0.02",
+            "differpid -d 0.1",
+            "rollpid -p -0.3",
+        ] {
+            assert!(
+                validate_text_command_for_target(command, ConnectionTarget::Remote).is_ok(),
+                "{command}"
+            );
+        }
+        for command in ["legheight 61.5", "R 0 0 0 61.5", "showimu -y", "showrpm -n"] {
+            assert!(
+                validate_text_command_for_target(command, ConnectionTarget::Remote).is_err(),
+                "{command}"
+            );
+        }
+        let full_robot_frame = "anglepid -p 65.00000000000000000";
+        assert_eq!(full_robot_frame.len(), 32);
+        assert!(
+            validate_text_command_for_target(full_robot_frame, ConnectionTarget::Robot).is_ok()
+        );
+        assert!(
+            validate_text_command_for_target(full_robot_frame, ConnectionTarget::Remote).is_err()
+        );
+    }
+
     #[test]
     fn parses_imu_triplet() {
         assert_eq!(

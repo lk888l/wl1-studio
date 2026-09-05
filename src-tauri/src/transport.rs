@@ -3,6 +3,27 @@ use std::time::Duration;
 
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 
+use crate::types::ConnectionTarget;
+
+fn serial_frame(command: &str, target: ConnectionTarget) -> Result<String, String> {
+    if target == ConnectionTarget::Remote {
+        if command.len() > 31 {
+            return Err("无线参数命令最多 31 字节，NRF24L01 帧需保留结尾空字节".into());
+        }
+        Ok(format!("{command}\n"))
+    } else {
+        Ok(command.to_owned())
+    }
+}
+
+fn command_gap(target: ConnectionTarget) -> Duration {
+    Duration::from_millis(if target == ConnectionTarget::Remote {
+        120
+    } else {
+        2
+    })
+}
+
 fn format_open_error(port_name: &str, error: &serialport::Error) -> String {
     #[cfg(target_os = "linux")]
     if matches!(
@@ -31,10 +52,15 @@ pub trait Transport: Send {
 pub struct SerialTransport {
     port_name: String,
     port: Box<dyn SerialPort>,
+    connection_target: ConnectionTarget,
 }
 
 impl SerialTransport {
-    pub fn open(port_name: &str, baud_rate: u32) -> Result<Self, String> {
+    pub fn open(
+        port_name: &str,
+        baud_rate: u32,
+        connection_target: ConnectionTarget,
+    ) -> Result<Self, String> {
         let port = serialport::new(port_name, baud_rate)
             .data_bits(DataBits::Eight)
             .parity(Parity::None)
@@ -46,6 +72,7 @@ impl SerialTransport {
         Ok(Self {
             port_name: port_name.to_owned(),
             port,
+            connection_target,
         })
     }
 }
@@ -56,15 +83,16 @@ impl Transport for SerialTransport {
     }
 
     fn write_command(&mut self, command: &str) -> Result<(), String> {
-        // The current firmware forwards each DMA receive-to-idle chunk directly
-        // to TaskReactor and does not trim CR/LF. A newline therefore becomes
-        // part of the final numeric token. Send one raw command per idle frame
-        // and leave a generous physical gap after flush instead.
+        // Robot Legacy firmware consumes one raw DMA idle chunk without trimming
+        // CR/LF. The remote bridge instead assembles LF-delimited commands across
+        // USB/UART chunks, then forwards a zero-padded 32-byte NRF payload. Its
+        // slower gap leaves room for the remote's 50 ms joystick radio loop.
+        let frame = serial_frame(command, self.connection_target)?;
         self.port
-            .write_all(command.as_bytes())
+            .write_all(frame.as_bytes())
             .and_then(|_| self.port.flush())
             .map_err(|error| format!("串口写入失败: {error}"))?;
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::sleep(command_gap(self.connection_target));
         Ok(())
     }
 
@@ -80,6 +108,7 @@ impl Transport for SerialTransport {
         Ok(Box::new(Self {
             port_name: self.port_name.clone(),
             port,
+            connection_target: self.connection_target,
         }))
     }
 }
@@ -87,6 +116,28 @@ impl Transport for SerialTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn robot_and_remote_use_their_respective_frame_boundaries() {
+        assert_eq!(
+            serial_frame("anglepid -p 65", ConnectionTarget::Robot).unwrap(),
+            "anglepid -p 65"
+        );
+        assert_eq!(
+            serial_frame("anglepid -p 65", ConnectionTarget::Remote).unwrap(),
+            "anglepid -p 65\n"
+        );
+        assert!(serial_frame(&"a".repeat(31), ConnectionTarget::Remote).is_ok());
+        assert!(serial_frame(&"a".repeat(32), ConnectionTarget::Remote).is_err());
+        assert_eq!(
+            command_gap(ConnectionTarget::Remote),
+            Duration::from_millis(120)
+        );
+        assert_eq!(
+            command_gap(ConnectionTarget::Robot),
+            Duration::from_millis(2)
+        );
+    }
 
     #[test]
     fn open_error_includes_port_name() {

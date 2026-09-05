@@ -16,6 +16,8 @@ pub struct SerialPortOption {
 #[serde(rename_all = "camelCase")]
 pub struct SerialConfig {
     pub mode: ConnectionRequestMode,
+    #[serde(default)]
+    pub connection_target: ConnectionTarget,
     pub port_name: Option<String>,
     #[serde(default = "default_baud_rate")]
     pub baud_rate: u32,
@@ -36,10 +38,19 @@ pub enum ConnectionRequestMode {
     Serial,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnectionTarget {
+    #[default]
+    Robot,
+    Remote,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionSnapshot {
     pub mode: &'static str,
+    pub connection_target: ConnectionTarget,
     pub label: String,
     /// Opaque generation token. Every newly opened device session gets a new
     /// value so delayed UI work cannot accidentally target a replacement link.
@@ -54,6 +65,7 @@ impl Default for ConnectionSnapshot {
     fn default() -> Self {
         Self {
             mode: "disconnected",
+            connection_target: ConnectionTarget::Robot,
             label: "未连接".into(),
             session_id: None,
             connected_at: None,
@@ -143,6 +155,29 @@ pub struct DeviceCapabilities {
 }
 
 impl DeviceCapabilities {
+    pub fn for_target(target: ConnectionTarget) -> Self {
+        if target == ConnectionTarget::Robot {
+            return Self::legacy_ascii();
+        }
+        Self {
+            protocol_version: 0,
+            firmware_label: "WL1 Remote Serial Bridge v1 · NRF24L01",
+            supported: vec!["transport.serial", "parameter.write_volatile"],
+            reserved: vec![
+                "handshake",
+                "telemetry.imu",
+                "telemetry.rpm",
+                "parameter.readback",
+                "parameter.persist",
+                "motion.target",
+                "calibration.commit",
+                "safety.arm_disarm",
+                "safety.motion_timeout",
+                "firmware.update",
+            ],
+        }
+    }
+
     pub fn legacy_ascii() -> Self {
         Self {
             protocol_version: 0,
@@ -169,5 +204,36 @@ impl DeviceCapabilities {
                 "transport.network",
             ],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_serial_configs_default_to_robot() {
+        let config: SerialConfig = serde_json::from_str(r#"{"mode":"serial"}"#).unwrap();
+        assert_eq!(config.connection_target, ConnectionTarget::Robot);
+        assert_eq!(config.baud_rate, 115_200);
+        assert!(!config.allow_unsafe_writes);
+    }
+
+    #[test]
+    fn remote_target_round_trips_and_has_parameter_only_capabilities() {
+        let config: SerialConfig =
+            serde_json::from_str(r#"{"mode":"serial","connectionTarget":"remote"}"#).unwrap();
+        let snapshot = ConnectionSnapshot {
+            connection_target: config.connection_target,
+            ..ConnectionSnapshot::default()
+        };
+        assert_eq!(
+            serde_json::to_value(snapshot).unwrap()["connectionTarget"],
+            "remote"
+        );
+        let capabilities = DeviceCapabilities::for_target(config.connection_target);
+        assert!(capabilities.supported.contains(&"parameter.write_volatile"));
+        assert!(!capabilities.supported.contains(&"motion.target"));
+        assert!(!capabilities.supported.contains(&"telemetry.imu"));
     }
 }

@@ -7,12 +7,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::protocol::{
-    validate_motion_target, validate_text_command, FirmwareUpdate, LegacyAsciiCodec, ProtocolCodec,
-    ValidatedCommand, ValidatedMotionCommand,
+    validate_motion_target, validate_text_command_for_target, FirmwareUpdate, LegacyAsciiCodec,
+    ProtocolCodec, ValidatedCommand, ValidatedMotionCommand,
 };
 use crate::transport::{SerialTransport, Transport};
 use crate::types::{
-    ConnectionSnapshot, ConsoleEvent, DisconnectedEvent, MotionTargetRequest, TelemetryFrame,
+    ConnectionSnapshot, ConnectionTarget, ConsoleEvent, DisconnectedEvent, MotionTargetRequest,
+    TelemetryFrame,
 };
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -53,14 +54,25 @@ impl AppState {
         port_name: &str,
         baud_rate: u32,
         writes_unlocked: bool,
+        connection_target: ConnectionTarget,
     ) -> Result<ConnectionSnapshot, String> {
         let _lifecycle = self
             .lifecycle
             .lock()
             .map_err(|_| "设备会话生命周期锁已损坏")?;
         self.disconnect_current(None)?;
-        let transport = Box::new(SerialTransport::open(port_name, baud_rate)?);
-        let session = DeviceSession::from_serial(app, transport, baud_rate, writes_unlocked)?;
+        let transport = Box::new(SerialTransport::open(
+            port_name,
+            baud_rate,
+            connection_target,
+        )?);
+        let session = DeviceSession::from_serial(
+            app,
+            transport,
+            baud_rate,
+            writes_unlocked,
+            connection_target,
+        )?;
         let snapshot = session.snapshot();
         *self.session.lock().map_err(|_| "设备会话状态已损坏")? = Some(session);
         Ok(snapshot)
@@ -108,10 +120,10 @@ impl AppState {
         command: &str,
         expected_session_id: u64,
     ) -> Result<(), String> {
-        let command = validate_text_command(command)?;
         let mut guard = self.session.lock().map_err(|_| "设备会话状态已损坏")?;
         let session = guard.as_mut().ok_or("请先连接设备")?;
         session.ensure_session_id(expected_session_id)?;
+        let command = validate_text_command_for_target(command, session.connection_target)?;
         if command.requires_write_unlock && !session.writes_unlocked {
             return Err("真实设备写入仍处于安全锁定；请断开后在连接页确认台架安全条件".into());
         }
@@ -134,6 +146,7 @@ impl AppState {
         let mut guard = self.session.lock().map_err(|_| "设备会话状态已损坏")?;
         let session = guard.as_mut().ok_or("请先连接设备")?;
         session.ensure_session_id(expected_session_id)?;
+        session.ensure_motion_supported()?;
         if !session.writes_unlocked {
             return Err("真实设备写入仍处于安全锁定；请断开后在连接页确认台架安全条件".into());
         }
@@ -155,6 +168,7 @@ impl AppState {
         let mut guard = self.session.lock().map_err(|_| "设备会话状态已损坏")?;
         let session = guard.as_mut().ok_or("请先连接设备")?;
         session.ensure_session_id(expected_session_id)?;
+        session.ensure_telemetry_supported(enabled)?;
         if let Err(reason) = session.set_telemetry(app, enabled) {
             emit_disconnected(app, session.session_id, reason.clone());
             schedule_fault_disconnect(app, session.session_id);
@@ -174,6 +188,7 @@ struct SerialReaderContext {
     writer: SharedSerialWriter,
     last_motion_height: SharedMotionHeight,
     session_id: u64,
+    connection_target: ConnectionTarget,
 }
 
 enum SessionWriter {
@@ -202,6 +217,7 @@ impl Default for MockControl {
 
 struct DeviceSession {
     mode: &'static str,
+    connection_target: ConnectionTarget,
     label: String,
     baud_rate: Option<u32>,
     session_id: u64,
@@ -222,8 +238,13 @@ impl DeviceSession {
         transport: Box<dyn Transport>,
         baud_rate: u32,
         writes_unlocked: bool,
+        connection_target: ConnectionTarget,
     ) -> Result<Self, String> {
-        let label = transport.label().to_owned();
+        let label = if connection_target == ConnectionTarget::Remote {
+            format!("{} · 遥控器无线调参", transport.label())
+        } else {
+            transport.label().to_owned()
+        };
         let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         let reader = transport.try_clone_box()?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -249,6 +270,7 @@ impl DeviceSession {
                         writer: thread_writer,
                         last_motion_height: thread_last_motion_height,
                         session_id,
+                        connection_target,
                     },
                 )
             })
@@ -256,6 +278,7 @@ impl DeviceSession {
 
         Ok(Self {
             mode: "serial",
+            connection_target,
             label,
             baud_rate: Some(baud_rate),
             session_id,
@@ -295,6 +318,7 @@ impl DeviceSession {
 
         Ok(Self {
             mode: "mock",
+            connection_target: ConnectionTarget::Robot,
             label: "WL1 模拟器".into(),
             baud_rate: None,
             session_id,
@@ -314,6 +338,7 @@ impl DeviceSession {
         let alive = self.alive.load(Ordering::Acquire);
         ConnectionSnapshot {
             mode: if alive { self.mode } else { "disconnected" },
+            connection_target: self.connection_target,
             label: if alive {
                 self.label.clone()
             } else {
@@ -330,6 +355,20 @@ impl DeviceSession {
     fn ensure_session_id(&self, expected_session_id: u64) -> Result<(), String> {
         if self.session_id != expected_session_id {
             return Err("设备会话已变化；已取消旧连接遗留的发送任务".into());
+        }
+        Ok(())
+    }
+
+    fn ensure_motion_supported(&self) -> Result<(), String> {
+        if self.connection_target == ConnectionTarget::Remote {
+            return Err("遥控器模式由实体摇杆控制运动；上位机仅支持无线参数写入".into());
+        }
+        Ok(())
+    }
+
+    fn ensure_telemetry_supported(&self, enabled: bool) -> Result<(), String> {
+        if enabled && self.connection_target == ConnectionTarget::Remote {
+            return Err("遥控器固件没有车辆遥测回传；请直连小车查看 IMU 与轮速".into());
         }
         Ok(())
     }
@@ -408,7 +447,7 @@ impl DeviceSession {
 
     fn best_effort_safety(&self) {
         if let SessionWriter::Serial(writer) = &self.writer {
-            best_effort_serial_safety(writer, &self.last_motion_height);
+            best_effort_serial_safety(writer, &self.last_motion_height, self.connection_target);
         }
     }
 }
@@ -540,7 +579,16 @@ fn write_serial_command(
     transport.write_command(command)
 }
 
-fn best_effort_serial_safety(writer: &SharedSerialWriter, last_motion_height: &SharedMotionHeight) {
+fn best_effort_serial_safety(
+    writer: &SharedSerialWriter,
+    last_motion_height: &SharedMotionHeight,
+    connection_target: ConnectionTarget,
+) {
+    // The remote owns joystick motion and has no telemetry forwarding. Its
+    // bridge does not accept R/show* commands, including during error cleanup.
+    if connection_target == ConnectionTarget::Remote {
+        return;
+    }
     let mut transport = match writer.lock() {
         Ok(transport) => transport,
         Err(poisoned) => poisoned.into_inner(),
@@ -571,11 +619,12 @@ fn fail_serial_reader(
     last_motion_height: &SharedMotionHeight,
     session_id: u64,
     reason: String,
+    connection_target: ConnectionTarget,
 ) {
     alive.store(false, Ordering::Release);
     // Safety cleanup must not depend on a responsive WebView receiving the
     // disconnect event. The UI event only updates presentation/session state.
-    best_effort_serial_safety(writer, last_motion_height);
+    best_effort_serial_safety(writer, last_motion_height, connection_target);
     emit_console(app, session_id, "system", reason.clone());
     emit_disconnected(app, session_id, reason);
     schedule_fault_disconnect(app, session_id);
@@ -597,7 +646,7 @@ fn schedule_fault_disconnect(app: &AppHandle, session_id: u64) {
             app,
             session_id,
             "system",
-            format!("无法启动后端故障清理任务；已执行即时安全写入: {error}"),
+            format!("无法启动后端故障清理任务；设备会话已锁定: {error}"),
         );
     }
 }
@@ -614,6 +663,7 @@ fn serial_reader_loop(
         writer,
         last_motion_height,
         session_id,
+        connection_target,
     } = context;
     let mut codec = LegacyAsciiCodec::default();
     let mut chunk = [0_u8; 256];
@@ -632,6 +682,12 @@ fn serial_reader_loop(
                     let line = pending.drain(..=newline).collect::<Vec<_>>();
                     let text = String::from_utf8_lossy(&line).trim().to_owned();
                     if text.is_empty() {
+                        continue;
+                    }
+                    if connection_target == ConnectionTarget::Remote {
+                        // Bridge logs and NRF hardware ACKs are not vehicle
+                        // telemetry or parameter execution acknowledgements.
+                        emit_console(&app, session_id, "rx", text);
                         continue;
                     }
                     let update = codec.decode_line(&text);
@@ -675,6 +731,7 @@ fn serial_reader_loop(
                         &last_motion_height,
                         session_id,
                         "串口接收超过 4096 字节仍无换行，帧边界已失步；设备会话已锁定".into(),
+                        connection_target,
                     );
                     break;
                 }
@@ -689,6 +746,7 @@ fn serial_reader_loop(
                     &last_motion_height,
                     session_id,
                     reason,
+                    connection_target,
                 );
                 break;
             }
@@ -704,6 +762,7 @@ fn serial_reader_loop(
                 &last_motion_height,
                 session_id,
                 reason,
+                connection_target,
             );
             break;
         }
@@ -809,6 +868,7 @@ mod tests {
     fn failing_serial_session(writes: Arc<Mutex<Vec<String>>>) -> DeviceSession {
         DeviceSession {
             mode: "serial",
+            connection_target: ConnectionTarget::Robot,
             label: "TEST".into(),
             baud_rate: Some(115_200),
             session_id: 99,
@@ -824,6 +884,48 @@ mod tests {
             writes_unlocked: true,
             shutdown_started: false,
         }
+    }
+
+    #[test]
+    fn remote_capability_rejections_leave_session_connected_and_write_nothing() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let mut session = failing_serial_session(Arc::clone(&writes));
+        session.connection_target = ConnectionTarget::Remote;
+
+        assert!(session.ensure_motion_supported().is_err());
+        assert!(session.ensure_telemetry_supported(true).is_err());
+        assert!(session.ensure_telemetry_supported(false).is_ok());
+        assert_eq!(session.snapshot().mode, "serial");
+        assert!(!session.snapshot().telemetry_enabled);
+        assert!(writes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remote_shutdown_and_drop_never_override_remote_joysticks() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let mut session = failing_serial_session(Arc::clone(&writes));
+        session.connection_target = ConnectionTarget::Remote;
+        *session.last_motion_height.lock().unwrap() = Some(60.0);
+        session.shutdown();
+        drop(session);
+
+        let mut session = failing_serial_session(Arc::clone(&writes));
+        session.connection_target = ConnectionTarget::Remote;
+        drop(session);
+        assert!(writes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn remote_flush_failure_does_not_send_robot_cleanup_commands() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let mut session = failing_serial_session(Arc::clone(&writes));
+        session.connection_target = ConnectionTarget::Remote;
+        let command =
+            validate_text_command_for_target("anglepid -p 65", ConnectionTarget::Remote).unwrap();
+        assert!(session.send_validated_text(&command).is_err());
+        assert_eq!(session.snapshot().mode, "disconnected");
+        drop(session);
+        assert_eq!(*writes.lock().unwrap(), ["anglepid -p 65"]);
     }
 
     #[test]

@@ -1,3 +1,5 @@
+import type { ConnectionTarget } from "../types";
+
 export type ParsedFirmwareLine =
   | { type: "imu"; roll: number; pitch: number; yaw: number; accelerationNormG?: number; accelerationTrusted?: boolean }
   | { type: "rpm"; left: number; right: number }
@@ -16,7 +18,8 @@ export function parseFirmwareLine(raw: string): ParsedFirmwareLine {
     roll !== undefined &&
     pitch !== undefined &&
     yaw !== undefined &&
-    imu.every(finite)
+    imu.every(finite) &&
+    imuFields.slice(0, 3).every((field) => field.length > 0)
   ) {
     if (imuFields.length === 3) return { type: "imu", roll, pitch, yaw };
     const accelerationText = imuFields[3]?.match(/^a=([+-]?[\d.]+)$/)?.[1];
@@ -66,7 +69,7 @@ export function commandByteLength(command: string): number {
   return new TextEncoder().encode(command.trim()).length;
 }
 
-export function validateFirmwareCommand(command: string): string | null {
+export function validateFirmwareCommand(command: string, connectionTarget: ConnectionTarget = "robot"): string | null {
   const trimmed = command.trim();
   if (!trimmed) {
     return "命令不能为空";
@@ -76,6 +79,9 @@ export function validateFirmwareCommand(command: string): string | null {
   }
   if (commandByteLength(trimmed) > 32) {
     return "命令超过固件 32 字节队列上限";
+  }
+  if (connectionTarget === "remote" && commandByteLength(trimmed) > 31) {
+    return "遥控器无线命令最多 31 字节，32 字节载荷需保留字符串结束符";
   }
   if (/[\r\n]/.test(trimmed)) {
     return "一次只能发送一条命令";
@@ -90,6 +96,7 @@ export function validateFirmwareCommand(command: string): string | null {
 
   const [name] = parts;
   if (name === "legheight") {
+    if (connectionTarget === "remote") return "遥控器模式的腿高由实体摇杆控制，周期 R 帧会覆盖 legheight；请直连小车调整。";
     return validateNumericCommand(parts, 44.5, 78.5, "腿高");
   }
   if (name === "anglebias") {
