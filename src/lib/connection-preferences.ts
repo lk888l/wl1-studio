@@ -1,0 +1,47 @@
+import type { ConnectionTarget, SerialPortOption } from "../types";
+
+const CONNECTION_KEY = "wl1-studio.connection.v1";
+
+export interface ConnectionPreferences {
+  target: ConnectionTarget;
+  portName: string;
+}
+
+export function sanitizeConnectionPreferences(value: unknown): ConnectionPreferences {
+  const candidate = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    target: candidate.target === "remote" ? "remote" : "robot",
+    portName: typeof candidate.portName === "string" && candidate.portName.length <= 256
+      ? candidate.portName.trim()
+      : "",
+  };
+}
+
+export function loadConnectionPreferences(): ConnectionPreferences {
+  try {
+    return sanitizeConnectionPreferences(JSON.parse(localStorage.getItem(CONNECTION_KEY) ?? "{}"));
+  } catch {
+    return { target: "robot", portName: "" };
+  }
+}
+
+export function saveConnectionPreferences(preferences: ConnectionPreferences): void {
+  try {
+    localStorage.setItem(CONNECTION_KEY, JSON.stringify(preferences));
+  } catch {
+    // Connection remains available when browser storage is disabled or full.
+  }
+}
+
+/** Select a known port or the sole available port; ambiguous lists require a choice. */
+export function selectAvailablePort(
+  ports: readonly SerialPortOption[],
+  currentPort: string,
+  preferredPort: string,
+): string {
+  if (ports.some((port) => port.name === currentPort)) return currentPort;
+  if (ports.some((port) => port.name === preferredPort)) return preferredPort;
+  return ports.length === 1 ? ports[0]?.name ?? "" : "";
+}

@@ -284,7 +284,7 @@ export class DeviceGateway {
   private requireWritableSession(expectedSessionId?: number): number {
     const sessionId = this.requireSession(expectedSessionId);
     if (!this.snapshot.writesUnlocked) {
-      throw new Error("当前为只读连接；完成协议兼容性与三项实体安全确认（共四项）并重新连接后才可写入。");
+      throw new Error("当前为只读连接，不能下发参数或运动目标。");
     }
     return sessionId;
   }

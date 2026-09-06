@@ -10,7 +10,8 @@ fn serial_frame(command: &str, target: ConnectionTarget) -> Result<String, Strin
         if command.len() > 31 {
             return Err("无线参数命令最多 31 字节，NRF24L01 帧需保留结尾空字节".into());
         }
-        Ok(format!("{command}\n"))
+        // The remote parses nrfsend before forwarding the inner payload over NRF.
+        Ok(format!("nrfsend {command}\n"))
     } else {
         Ok(command.to_owned())
     }
@@ -84,7 +85,7 @@ impl Transport for SerialTransport {
 
     fn write_command(&mut self, command: &str) -> Result<(), String> {
         // Robot Legacy firmware consumes one raw DMA idle chunk without trimming
-        // CR/LF. The remote bridge instead assembles LF-delimited commands across
+        // CR/LF. The remote bridge assembles LF-delimited nrfsend commands across
         // USB/UART chunks, then forwards a zero-padded 32-byte NRF payload. Its
         // slower gap leaves room for the remote's 50 ms joystick radio loop.
         let frame = serial_frame(command, self.connection_target)?;
@@ -125,9 +126,21 @@ mod tests {
         );
         assert_eq!(
             serial_frame("anglepid -p 65", ConnectionTarget::Remote).unwrap(),
-            "anglepid -p 65\n"
+            "nrfsend anglepid -p 65\n"
         );
-        assert!(serial_frame(&"a".repeat(31), ConnectionTarget::Remote).is_ok());
+        let full_payload = "a".repeat(31);
+        let remote_frame = serial_frame(&full_payload, ConnectionTarget::Remote).unwrap();
+        assert_eq!(remote_frame, format!("nrfsend {full_payload}\n"));
+        // The 31-byte limit applies to the radio payload, excluding UART framing.
+        assert_eq!(remote_frame.len(), 40);
+        assert_eq!(
+            remote_frame
+                .strip_prefix("nrfsend ")
+                .unwrap()
+                .strip_suffix('\n')
+                .unwrap(),
+            full_payload
+        );
         assert!(serial_frame(&"a".repeat(32), ConnectionTarget::Remote).is_err());
         assert_eq!(
             command_gap(ConnectionTarget::Remote),

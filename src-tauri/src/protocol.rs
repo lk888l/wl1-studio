@@ -186,14 +186,14 @@ pub fn validate_text_command(command: &str) -> Result<ValidatedCommand, String> 
         "anglebias" => {
             require_len(&parts, 2)?;
             if parts[1] != "auto" {
-                parse_in_range(parts[1], 5.0, 20.0, "俯仰静态偏置")?;
+                parse_in_range(parts[1], -20.0, 20.0, "俯仰静态偏置")?;
             }
         }
         "anglepid" if parts.as_slice() == ["anglepid", "auto"] => {}
-        "anglepid" => validate_pid(&parts, (45.0, 95.0), (0.0, 1.0), Some((30.0, 100.0)))?,
-        "velocitypid" => validate_pid(&parts, (0.0, 0.15), (0.0, 0.03), Some((0.0, 0.05)))?,
-        "differpid" => validate_pid(&parts, (0.0, 5.0), (0.0, 0.01), Some((0.0, 0.2)))?,
-        "rollpid" => validate_pid(&parts, (-1.0, 1.0), (-1.0, 0.0), None)?,
+        "anglepid" => validate_pid(&parts, (0.0, 150.0), (0.0, 1.0), Some((-107.0, 100.0)))?,
+        "velocitypid" => validate_pid(&parts, (0.0, 10.0), (0.0, 100.0), Some((0.0, 100.0)))?,
+        "differpid" => validate_pid(&parts, (-50.0, 50.0), (0.0, 1.0), Some((0.0, 100.0)))?,
+        "rollpid" => validate_pid(&parts, (-100.0, 100.0), (-10.0, 10.0), None)?,
         _ => return Err(format!("当前安全配置不允许发送命令: {command_name}")),
     }
 
@@ -405,9 +405,48 @@ mod tests {
         .is_err());
     }
 
+    // Limits from vofa_host_tools_cfg/vofa_tab.json, including negative PID terms.
     #[test]
-    fn accepts_the_worktree_intersection_angle_bias_range() {
-        assert!(validate_text_command("anglebias 4.9").is_err());
+    fn accepts_vofa_parameter_boundaries_and_rejects_outside_values() {
+        for (prefix, min, max, step) in [
+            ("anglepid -p", 0.0, 150.0, 0.1),
+            ("anglepid -i", 0.0, 1.0, 0.1),
+            ("anglepid -d", -107.0, 100.0, 0.1),
+            ("velocitypid -p", 0.0, 10.0, 0.01),
+            ("velocitypid -i", 0.0, 100.0, 0.001),
+            ("velocitypid -d", 0.0, 100.0, 0.01),
+            ("differpid -p", -50.0, 50.0, 0.1),
+            ("differpid -i", 0.0, 1.0, 0.001),
+            ("differpid -d", 0.0, 100.0, 0.1),
+            ("rollpid -p", -100.0, 100.0, 0.1),
+            ("rollpid -i", -10.0, 10.0, 0.1),
+            ("anglebias", -20.0, 20.0, 0.1),
+            ("legheight", 44.5, 78.5, 0.1),
+        ] {
+            for target in [ConnectionTarget::Robot, ConnectionTarget::Remote] {
+                if prefix == "legheight" && target == ConnectionTarget::Remote {
+                    continue;
+                }
+                for value in [min, max] {
+                    let command = format!("{prefix} {value}");
+                    assert!(
+                        validate_text_command_for_target(&command, target).is_ok(),
+                        "{command}"
+                    );
+                }
+                for value in [min - step, max + step] {
+                    let command = format!("{prefix} {value}");
+                    assert!(
+                        validate_text_command_for_target(&command, target).is_err(),
+                        "{command}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn preserves_command_syntax_checks_and_legacy_auto_forms() {
+        assert!(validate_text_command("anglebias -20.1").is_err());
         assert!(validate_text_command("anglebias 12.6").is_ok());
         assert!(validate_text_command("anglebias 20.0").is_ok());
         assert!(validate_text_command("anglebias 20.1").is_err());
@@ -415,9 +454,9 @@ mod tests {
         assert!(validate_text_command("anglepid auto").is_ok());
         assert!(validate_text_command("legheight +61.5").is_err());
         assert!(validate_text_command("anglepid -i 1.1").is_err());
-        assert!(validate_text_command("anglepid -d 29.9").is_err());
-        assert!(validate_text_command("differpid -i 0.011").is_err());
+        assert!(validate_text_command("anglepid -d -107.1").is_err());
+        assert!(validate_text_command("differpid -i 1.001").is_err());
         assert!(validate_text_command("rollpid -p -1.0").is_ok());
-        assert!(validate_text_command("rollpid -i 0.1").is_err());
+        assert!(validate_text_command("rollpid -i 10.1").is_err());
     }
 }

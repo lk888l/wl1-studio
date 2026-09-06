@@ -70,11 +70,11 @@ describe("WL1 文本协议", () => {
     expect(validateFirmwareCommand("rollpid -d 0.1")).toContain("没有 D 项");
     expect(validateFirmwareCommand("legheight +61.5")).toContain("十进制数字");
     expect(validateFirmwareCommand("anglepid -i 1.1")).toContain("0..=1");
-    expect(validateFirmwareCommand("anglepid -d 29.9")).toContain("30..=100");
-    expect(validateFirmwareCommand("differpid -i 0.011")).toContain("0..=0.01");
+    expect(validateFirmwareCommand("anglepid -d -107.1")).toContain("-107..=100");
+    expect(validateFirmwareCommand("differpid -i 1.001")).toContain("0..=1");
     expect(validateFirmwareCommand("rollpid -p -1.0")).toBeNull();
-    expect(validateFirmwareCommand("rollpid -i 0.1")).toContain("-1..=0");
-    expect(validateFirmwareCommand("anglebias 4.9")).toContain("5..=20");
+    expect(validateFirmwareCommand("rollpid -i 10.1")).toContain("-10..=10");
+    expect(validateFirmwareCommand("anglebias -20.1")).toContain("-20..=20");
   });
 
   it("生成字段顺序固定的 R 命令", () => {

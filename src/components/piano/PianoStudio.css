@@ -18,9 +18,6 @@
 
 /* Pocket piano workspace */
 .piano-shell {
-  --accent: #ed765d;
-  --accent-deep: #ce5657;
-  --accent-soft: #ffe3dc;
   --piano-blue: #6f82f6;
   --piano-navy: #26334a;
   background:
@@ -31,7 +28,7 @@
 .piano-shell .ambient--one { background: rgba(255,142,117,.18); }
 .piano-shell .ambient--two { background: rgba(99,210,193,.15); }
 .piano-shell .ambient--three { background: rgba(117,136,255,.12); }
-.piano-sidebar .brand-mark { background: linear-gradient(145deg, #ff9679, #ce5961); }
+.piano-sidebar .brand-mark { background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent-deep)); }
 .piano-prototype-pill,
 .firmware-prototype-badge {
   display: inline-flex;

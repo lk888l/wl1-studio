@@ -5,7 +5,6 @@ import {
   Gauge,
   Radio,
   SlidersHorizontal,
-  Sparkles,
   Stethoscope,
   WandSparkles,
 } from "lucide-react";
@@ -14,12 +13,10 @@ import type { ConnectionSnapshot, PageId } from "../types";
 import { isRemoteConnection } from "../lib/connection";
 
 const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
+  { id: "tuning", label: "运动工作台", icon: SlidersHorizontal },
   { id: "overview", label: "总览", icon: Activity },
   { id: "kinematics", label: "腿部运动学", icon: GitFork },
-  { id: "tuning", label: "参数调校", icon: SlidersHorizontal },
-  { id: "control", label: "实时控制", icon: Radio },
   { id: "calibration", label: "标定向导", icon: WandSparkles },
-  { id: "personalization", label: "个性设置", icon: Sparkles },
   { id: "diagnostics", label: "诊断终端", icon: Stethoscope },
 ];
 

@@ -1,0 +1,39 @@
+.control-page .arm-control { margin-top: 14px; }
+.control-page .arm-control > svg { flex: 0 0 auto; }
+.control-release-hint { margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.5; text-align: center; }
+.motion-target-control { min-width: 0; gap: 6px; }
+.motion-target-control__row { display: flex; min-width: 0; gap: 8px; align-items: center; justify-content: space-between; }
+.motion-target-control__value { display: flex; flex: 0 0 auto; align-items: center; border: 1px solid var(--line); border-radius: 9px; background: rgba(255,255,255,.65); }
+.motion-target-control .motion-target-control__value input { width: 70px; height: 31px; margin: 0; padding: 5px 6px 5px 8px; border: 0; border-radius: 9px; outline: 0; color: var(--accent-deep); background: transparent; font-size: 13px; font-weight: 750; text-align: right; }
+.motion-target-control__value > span { padding-right: 8px; color: var(--muted); font-size: 11px; }
+.motion-target-control__value:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+.motion-target-control > input[type="range"] { height: 4px; margin: 5px 0 1px; }
+.motion-target-control__range { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
+.control-select-height { justify-self: start; font-size: 12px; }
+.control-page.control-page--compact { min-width: 0; gap: 0; }
+.control-page--compact .control-layout { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.control-page--compact .control-deck, .control-page--compact .control-settings { min-width: 0; padding: 15px; }
+.control-page--compact .control-deck__head { gap: 8px; align-items: center; }
+.control-page--compact .control-deck__head h2 { margin: 0; font-size: 15px; }
+.control-page--compact .control-deck__head .soft-badge { padding: 5px 8px; font-size: 10px; }
+.control-page--compact .arm-control { gap: 8px; margin-top: 12px; padding: 10px; border-radius: 11px; }
+.control-page--compact .arm-control strong { font-size: 12px; }
+.control-page--compact .arm-control small { font-size: 10px; }
+.control-page--compact .motion-pad { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, 55px); gap: 6px; width: min(100%, 264px); margin: 14px auto; }
+.control-page--compact .motion-key { gap: 3px; padding: 4px; border-radius: 12px; box-shadow: 0 4px 10px rgba(70,94,137,.09), inset 0 1px white; }
+.control-page--compact .motion-key svg { width: 16px; height: 16px; }
+.control-page--compact .motion-key span { font-size: 11px; }
+.control-page--compact .motion-key small { font-size: 9px; }
+.control-page--compact .motion-center { width: 52px; height: 52px; place-self: center; }
+.control-page--compact .motion-center small { margin-top: 1px; font-size: 9px; }
+.control-page--compact .control-stop { justify-content: center; width: 100%; min-height: 37px; padding: 8px 12px; border-radius: 11px; }
+.control-page--compact .control-release-hint { font-size: 10px; }
+.control-page--compact .control-settings { gap: 14px; }
+.control-page--compact .motion-target-control strong { font-size: 12px; }
+.control-height-summary { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.control-height-summary > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.control-height-summary strong { font-size: 12px; }
+.control-height-summary output { color: var(--accent-deep); font-size: 14px; font-weight: 750; }
+.control-height-summary small { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.control-live-feedback { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.control-live-feedback strong { color: var(--ink); font-weight: 700; }

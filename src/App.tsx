@@ -1,24 +1,22 @@
 import {
   AlertTriangle,
   ArrowLeft,
-  Bell,
   Cable,
   ChevronRight,
-  CircleHelp,
   Clock3,
   Gauge,
   Music2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CalibrationPage } from "./components/pages/CalibrationPage";
 import { ControlPage } from "./components/pages/ControlPage";
 import { DiagnosticsPage } from "./components/pages/DiagnosticsPage";
 import { KinematicsPage } from "./components/pages/KinematicsPage";
 import { OverviewPage } from "./components/pages/OverviewPage";
-import { PersonalizationPage } from "./components/pages/PersonalizationPage";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
+import { LiveChart } from "./components/LiveChart";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ProductHome } from "./components/ProductHome";
 import { Sidebar } from "./components/Sidebar";
@@ -53,10 +51,9 @@ import type {
 const pageMeta: Record<PageId, { label: string }> = {
   overview: { label: "总览" },
   kinematics: { label: "腿部运动学" },
-  tuning: { label: "参数调校" },
+  tuning: { label: "运动工作台" },
   control: { label: "实时控制" },
   calibration: { label: "标定向导" },
-  personalization: { label: "个性设置" },
   diagnostics: { label: "诊断终端" },
 };
 
@@ -134,15 +131,26 @@ const pianoPreviewEnabled = import.meta.env.DEV
 
 interface Wl1StudioProps {
   onBack: () => void;
+  personalization: PersonalizationSettings;
 }
 
 export default function App() {
+  const [personalization, setPersonalization] = useState<PersonalizationSettings>(loadPersonalization);
+  const [personalizationPersisted, setPersonalizationPersisted] = useState(true);
   const [view, setView] = useState<AppView>("products");
   const [productTransition, setProductTransition] = useState<ProductTransitionState>("idle");
   const [launchTarget, setLaunchTarget] = useState<Exclude<AppView, "products"> | null>(null);
   const [catalogSafety, setCatalogSafety] = useState<CatalogSafetyState>("checking");
   const [catalogSafetyError, setCatalogSafetyError] = useState<string | null>(null);
   const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
+
+  useEffect(() => {
+    setPersonalizationPersisted(savePersonalization(personalization));
+  }, [personalization]);
+
+  const updatePersonalization = useCallback((next: PersonalizationSettings): void => {
+    setPersonalization({ ...defaultPersonalization, ...next });
+  }, []);
 
   useEffect(() => {
     // The generation is intentionally read only to make each explicit retry
@@ -196,26 +204,38 @@ export default function App() {
   const openProduct = useCallback((target: Exclude<AppView, "products">): void => {
     if (catalogSafety !== "ready" || productTransition !== "idle") return;
     if (target === "piano" && !pianoPreviewEnabled) return;
+    if (personalization.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setView(target);
+      return;
+    }
     setLaunchTarget(target);
     setProductTransition("covering");
-  }, [catalogSafety, productTransition]);
+  }, [catalogSafety, personalization.reducedMotion, productTransition]);
 
   const launchLabel = launchTarget === "piano" ? "KeyNest Studio" : "WL1 Studio";
 
   return (
-    <div className="app-stage">
+    <div
+      className="app-stage"
+      data-accent={personalization.accent}
+      data-glass={personalization.glassStrength}
+      data-reduced-motion={personalization.reducedMotion ? "true" : "false"}
+    >
       {view === "products" ? (
         <ProductHome
           safetyState={catalogSafety}
           safetyError={catalogSafetyError}
           pianoPreviewEnabled={pianoPreviewEnabled}
           launching={productTransition === "covering" ? launchTarget : null}
+          personalization={personalization}
+          personalizationPersisted={personalizationPersisted}
+          onPersonalizationChange={updatePersonalization}
           onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
           onOpenWl1={() => openProduct("wl1")}
           onOpenPiano={() => openProduct("piano")}
         />
       ) : view === "wl1" ? (
-        <Wl1Studio onBack={() => setView("products")} />
+        <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
       ) : (
         <PianoStudio onBack={() => setView("products")} />
       )}
@@ -240,10 +260,9 @@ export default function App() {
   );
 }
 
-function Wl1Studio({ onBack }: Wl1StudioProps) {
-  const [page, setPage] = useState<PageId>("overview");
+function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
+  const [page, setPage] = useState<PageId>("tuning");
   const [connection, setConnection] = useState<ConnectionSnapshot>(deviceGateway.connection);
-  const [connectionOpen, setConnectionOpen] = useState(false);
   const [startupReady, setStartupReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [startupAttempt, setStartupAttempt] = useState(0);
@@ -253,14 +272,14 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
   const [samples, setSamples] = useState<TelemetrySample[]>([]);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([initialConsole]);
   const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+  const [telemetryBusy, setTelemetryBusy] = useState(false);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [draftParameters, setDraftParameters] = useState<ParameterValues>({ ...defaultParameterValues });
   const [appliedParameters, setAppliedParameters] = useState<Partial<ParameterValues>>({});
   const [requestedParameterIds, setRequestedParameterIds] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<ParameterProfile[]>(() => [...builtinProfiles, ...loadProfiles()]);
   const [parameterSending, setParameterSending] = useState(false);
   const [parameterNotice, setParameterNotice] = useState<string | null>(null);
-  const [personalization, setPersonalization] = useState<PersonalizationSettings>(loadPersonalization);
-  const [personalizationPersisted, setPersonalizationPersisted] = useState(true);
   const [lastMotionCommand, setLastMotionCommand] = useState("");
   const [motionHeight, setMotionHeight] = useState<{ value: number; requested: boolean } | null>(null);
   const [freshnessNow, setFreshnessNow] = useState(Date.now());
@@ -327,7 +346,6 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
         const safetyMessage = `无法确认并清理 Rust 后端遗留设备会话：${message}`;
         setStartupError(safetyMessage);
         setConnectionError(`启动安全检查失败，连接功能保持锁定：${message}。可点击“刷新”重试。`);
-        setConnectionOpen(true);
       })
       .finally(() => {
         if (!cancelled) setConnectionBusy(false);
@@ -336,10 +354,6 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
       cancelled = true;
     };
   }, [startupAttempt]);
-
-  useEffect(() => {
-    setPersonalizationPersisted(savePersonalization(personalization));
-  }, [personalization]);
 
   useEffect(() => {
     // Nothing can become stale while disconnected. Avoid waking and
@@ -361,17 +375,15 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
     }
   }, []);
 
-  const openConnection = useCallback(() => {
-    parameterOperation.current += 1;
-    setConnectionOpen(true);
-    setConnectionError(null);
-    if (!startupReady) {
-      setConnectionError("正在执行启动安全检查并清理旧设备会话，请稍候。");
-      setStartupAttempt((value) => value + 1);
-      return;
-    }
-    void refreshPorts();
+  useEffect(() => {
+    if (startupReady) void refreshPorts();
   }, [refreshPorts, startupReady]);
+
+  const openConnection = useCallback(() => {
+    const reducedMotion = personalization.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById("device-connection")?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+    document.querySelector<HTMLElement>("#device-connection select, #device-connection button")?.focus({ preventScroll: true });
+  }, [personalization.reducedMotion]);
 
   const connect = useCallback(async (config: SerialConfig): Promise<void> => {
     if (!startupReady) {
@@ -385,24 +397,22 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
       const snapshot = await deviceGateway.connect(config);
       setSamples([]);
       setLastMotionCommand("");
-      setDraftParameters({ ...defaultParameterValues });
       setAppliedParameters({});
       setRequestedParameterIds([]);
-      setMotionHeight(snapshot.mode === "mock" ? { value: 61.5, requested: true } : null);
+      setMotionHeight(null);
       setParameterNotice(isRemoteConnection(snapshot)
         ? "已打开遥控器串口：可发送 PID 与姿态偏置；需桥接固件，无法确认小车在线或参数生效。"
-        : "已进入新设备会话：草稿已回到上位机默认参考，所有设备参数仍视为未知。");
+        : "已连接：保留当前参数草稿，点击下发即可应用。设备当前参数尚未确认。");
       setConnection(snapshot);
       if (snapshot.mode === "mock") {
         await deviceGateway.setTelemetry({ imu: true, rpm: true });
         setTelemetryEnabled(true);
         setConnection(deviceGateway.connection);
       } else {
-        // 真实串口默认保持低流量；用户可在诊断页主动开启遥测。
+        // 真实串口默认保持低流量；用户可在工作台或诊断页开启遥测。
         setTelemetryEnabled(false);
       }
-      setConnectionOpen(false);
-      if (isRemoteConnection(snapshot)) setPage("tuning");
+      setPage("tuning");
     } catch (reason) {
       setConnection(deviceGateway.connection);
       if (deviceGateway.connection.mode === "disconnected") {
@@ -429,7 +439,6 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
       setAppliedParameters({});
       setRequestedParameterIds([]);
       setMotionHeight(null);
-      setConnectionOpen(false);
     } catch (reason) {
       setConnectionError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -464,7 +473,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
     const command = motionCommand(target);
     await deviceGateway.sendMotionTarget(target, activeSessionId);
     setLastMotionCommand(command);
-    setMotionHeight({ value: target.height, requested: true });
+    setMotionHeight((current) => current?.value === target.height ? { ...current, requested: true } : current);
   }, [activeSessionId]);
 
   const changeParameter = useCallback((id: string, next: number): void => {
@@ -472,6 +481,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
     if (!definition || !Number.isFinite(next)) return;
     const value = Math.min(definition.max, Math.max(definition.min, next));
     setDraftParameters((current) => ({ ...current, [id]: value }));
+    if (id === "legHeight") setMotionHeight(null);
   }, []);
 
   const sendParameter = useCallback(async (id: string): Promise<void> => {
@@ -564,41 +574,28 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
     }
   }, [profiles]);
 
-  const updatePersonalization = useCallback((next: PersonalizationSettings): void => {
-    setPersonalization({ ...defaultPersonalization, ...next });
-  }, []);
-
   const setTelemetry = useCallback(async (enabled: boolean): Promise<void> => {
     await deviceGateway.setTelemetry({ imu: enabled, rpm: enabled }, activeSessionId);
     setTelemetryEnabled(enabled);
     setConnection(deviceGateway.connection);
   }, [activeSessionId]);
 
-  const shellAttributes = useMemo(() => ({
-    "data-accent": personalization.accent,
-    "data-glass": personalization.glassStrength,
-    "data-reduced-motion": personalization.reducedMotion ? "true" : "false",
-  }), [personalization]);
-
   const navigate = useCallback((next: PageId): void => {
     if (next !== page) parameterOperation.current += 1;
-    setPage(next);
+    setPage(next === "control" ? "tuning" : next);
   }, [page]);
 
   const returnToProductHome = useCallback((): void => {
     if (connectionBusy) {
       setConnectionError("当前设备操作尚未完成，请等待操作结束后再返回产品首页。");
-      setConnectionOpen(true);
       return;
     }
     if (connected) {
       setConnectionError("切换产品前请先断开当前设备，避免设备会话在后台继续运行。");
-      setConnectionOpen(true);
       return;
     }
     if (!startupReady) {
       setConnectionError("启动安全检查完成前不能离开当前工作台，请先完成安全清理。");
-      setConnectionOpen(true);
       return;
     }
     parameterOperation.current += 1;
@@ -607,7 +604,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
 
   const currentMeta = pageMeta[page];
   return (
-    <div className="app-shell" {...shellAttributes}>
+    <div className="app-shell wl1-shell">
       <div className="ambient ambient--one" /><div className="ambient ambient--two" /><div className="ambient ambient--three" />
       <Sidebar page={page} robotName={personalization.robotName} connection={connection} onPageChange={navigate} onConnectionOpen={openConnection} />
       <div className="workspace">
@@ -626,11 +623,11 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
           </div>
           <div className="topbar-actions">
             <span className="topbar-clock"><Clock3 size={15} />{new Date().toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</span>
-            <button className="icon-button" type="button" aria-label="帮助"><CircleHelp size={18} /></button>
-            <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={18} /><i /></button>
-            <button className={connected ? "connection-button is-online" : startupError ? "connection-button is-fault" : "connection-button"} type="button" onClick={openConnection}><span className="status-orb" /><div><small>{remote ? "REMOTE SERIAL OPEN" : connected ? "CONNECTED" : startupError ? "SAFETY LOCKED" : "OFFLINE"}</small><strong>{startupError ? "需要人工确认" : connection.label}</strong></div><Cable size={17} /></button>
+            <button className={connected ? "connection-button is-online" : startupError ? "connection-button is-fault" : "connection-button"} type="button" onClick={openConnection}><span className="status-orb" /><div><small>{remote ? "REMOTE SERIAL OPEN" : connected ? "CONNECTED" : startupError ? "SAFETY LOCKED" : "OFFLINE"}</small><strong>{startupError ? "初始化失败" : connected ? connection.label : "连接设备"}</strong></div><Cable size={17} /></button>
           </div>
         </header>
+
+        <ConnectionModal connection={connection} ports={ports} loading={connectionBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onConnect={(config) => void connect(config)} onDisconnect={() => void disconnect()} />
 
         {startupError && (
           <section className="startup-danger-banner" role="alert">
@@ -652,15 +649,24 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
           )}
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
           {page === "kinematics" && <KinematicsPage />}
-          {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => setDraftParameters(mergeKnownParameterValues(appliedParameters))} />}
-          {page === "control" && !remote && <ControlPage key={`${activeSessionId ?? "disconnected"}-${connectionOpen || parameterSending ? "suspended" : "ready"}`} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionOpen || connectionBusy || parameterSending || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
+          {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || connectionBusy} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
+            <section className="workbench-telemetry glass-card" aria-label="实时反馈">
+              <div className="workbench-telemetry__heading"><h2>实时反馈</h2><button className="text-button" type="button" disabled={!connected || connectionBusy || telemetryBusy || parameterSending} onClick={() => {
+                setTelemetryBusy(true); setTelemetryError(null);
+                void setTelemetry(!telemetryEnabled).catch((reason: unknown) => setTelemetryError(reason instanceof Error ? reason.message : String(reason))).finally(() => setTelemetryBusy(false));
+              }}>{telemetryBusy ? "切换中…" : telemetryEnabled ? "关闭遥测" : "开启遥测"}</button></div>
+              <div className="workbench-telemetry__values"><div><span>俯仰 / 横滚</span><strong>{imuFresh ? latest?.pitch.toFixed(1) : "--"} / {imuFresh ? latest?.roll.toFixed(1) : "--"}<small> °</small></strong></div><div><span>左轮 / 右轮</span><strong>{rpmFresh ? latest?.leftRpm.toFixed(0) : "--"} / {rpmFresh ? latest?.rightRpm.toFixed(0) : "--"}<small> rpm</small></strong></div></div>
+              <LiveChart samples={imuFresh ? samples : []} compact />
+              {!telemetryEnabled && <p className="workbench-footnote">开启遥测后，可边调参数边观察姿态与轮速。</p>}
+              {telemetryEnabled && (!imuFresh || !rpmFresh) && <p className="workbench-footnote">等待新的姿态与轮速数据…</p>}
+              {telemetryError && <div className="inline-error" role="alert">{telemetryError}</div>}
+            </section>
+          ) : undefined} />}
           {page === "calibration" && !remote && <CalibrationPage connected={connected} writesUnlocked={writesUnlocked} samples={imuFresh ? samples : []} onSendText={sendText} />}
-          {page === "personalization" && <PersonalizationPage settings={personalization} persisted={personalizationPersisted} onChange={updatePersonalization} />}
           {page === "diagnostics" && <DiagnosticsPage connection={connection} entries={consoleEntries} telemetryEnabled={telemetryEnabled} writesUnlocked={writesUnlocked} onSend={sendText} onTelemetryChange={setTelemetry} onClear={() => setConsoleEntries([])} onConnectionOpen={openConnection} />}
         </main>
       </div>
 
-      <ConnectionModal open={connectionOpen} connection={connection} ports={ports} loading={connectionBusy} startupReady={startupReady} error={connectionError} onClose={() => setConnectionOpen(false)} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onConnect={(config) => void connect(config)} onDisconnect={() => void disconnect()} />
     </div>
   );
 }

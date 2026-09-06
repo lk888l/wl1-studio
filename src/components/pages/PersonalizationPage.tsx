@@ -24,13 +24,13 @@ export function PersonalizationPage({ settings, persisted, onChange }: Personali
   return (
     <div className="page-stack personalization-page">
       <section className="page-heading">
-        <div><h1>个性设置</h1><p>调整界面与工作流偏好，设置仅保存在本机。</p></div>
+        <div><h1>个性设置</h1><p>统一设置首页与各产品工作台的界面偏好，配置自动保存在本机。</p></div>
         <button className="secondary-button" type="button" onClick={() => onChange(defaultPersonalization)}><RotateCcw size={16} />恢复默认</button>
       </section>
 
       <div className="personalization-grid">
         <section className="settings-card glass-card">
-          <div className="settings-card__head"><span className="settings-icon"><WandSparkles size={21} /></span><div><small>IDENTITY</small><h2>机器人身份</h2></div><span className="local-only">仅本机</span></div>
+          <div className="settings-card__head"><span className="settings-icon"><WandSparkles size={21} /></span><div><small>IDENTITY</small><h2>WL1 机器人身份</h2></div><span className="local-only">仅本机</span></div>
           <label className="form-field"><span>显示名称</span><input value={settings.robotName} maxLength={28} onChange={(event) => update("robotName", event.target.value)} /></label>
           <div className="identity-preview"><span className="identity-avatar">W1</span><div><small>CONNECTED ROBOT</small><strong>{settings.robotName || "未命名 WL1"}</strong><p>Legacy ASCII · Device ID reserved</p></div></div>
         </section>
@@ -58,7 +58,7 @@ export function PersonalizationPage({ settings, persisted, onChange }: Personali
         </section>
 
         <section className="settings-card glass-card">
-          <div className="settings-card__head"><span className="settings-icon"><LayoutDashboard size={21} /></span><div><small>WORKSPACE</small><h2>工作台偏好</h2></div></div>
+          <div className="settings-card__head"><span className="settings-icon"><LayoutDashboard size={21} /></span><div><small>WORKSPACE</small><h2>WL1 工作台偏好</h2></div></div>
           <label className="switch-row"><span><strong>紧凑遥测窗口</strong><small>总览只绘制最近 90 帧，降低低端设备负载。</small></span><input type="checkbox" checked={settings.compactTelemetry} onChange={(event) => update("compactTelemetry", event.target.checked)} /><i /></label>
           <fieldset className="radio-stack"><legend>开机姿态偏好 <em>接口预留</em></legend>
             {(["balanced", "low", "last"] as const).map((pose) => <label key={pose}><input type="radio" name="boot-pose" checked={settings.bootPose === pose} onChange={() => update("bootPose", pose)} /><span><strong>{{ balanced: "平衡姿态", low: "低位姿态", last: "恢复上次" }[pose]}</strong><small>{{ balanced: "上位机默认参考，不代表机械安全值", low: "预留搬运与检修姿态", last: "需要未来固件持久化" }[pose]}</small></span></label>)}
@@ -66,7 +66,7 @@ export function PersonalizationPage({ settings, persisted, onChange }: Personali
         </section>
       </div>
 
-      <section className="settings-footer glass-card"><Sparkles size={19} /><div><strong>{persisted ? "设置会即时生效并自动保存" : "设置已生效，但本机存储写入失败"}</strong><p>这部分配置不会发送到机器人；待固件加入 SETTINGS_GET / SET / COMMIT 后再启用设备同步。</p></div><span className={`soft-badge${persisted ? " is-success" : ""}`}>{persisted ? "已保存到本机" : "仅当前会话"}</span></section>
+      <section className="settings-footer glass-card"><Sparkles size={19} /><div><strong>{persisted ? "设置会即时生效并自动保存" : "设置已生效，但本机存储写入失败"}</strong><p>主题与动态效果应用于整个软件；机器人名称、灯光预览和工作台偏好用于 WL1，配置仅在本机生效。</p></div><span className={`soft-badge${persisted ? " is-success" : ""}`}>{persisted ? "已保存到本机" : "仅当前会话"}</span></section>
     </div>
   );
 }

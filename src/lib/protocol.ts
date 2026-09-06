@@ -101,13 +101,13 @@ export function validateFirmwareCommand(command: string, connectionTarget: Conne
   }
   if (name === "anglebias") {
     if (parts.length === 2 && parts[1] === "auto") return null;
-    return validateNumericCommand(parts, 5, 20, "俯仰静态偏置");
+    return validateNumericCommand(parts, -20, 20, "俯仰静态偏置");
   }
   if (name === "anglepid" && parts.length === 2 && parts[1] === "auto") return null;
-  if (name === "anglepid") return validatePidCommand(parts, [45, 95], [0, 1], [30, 100]);
-  if (name === "velocitypid") return validatePidCommand(parts, [0, 0.15], [0, 0.03], [0, 0.05]);
-  if (name === "differpid") return validatePidCommand(parts, [0, 5], [0, 0.01], [0, 0.2]);
-  if (name === "rollpid") return validatePidCommand(parts, [-1, 1], [-1, 0]);
+  if (name === "anglepid") return validatePidCommand(parts, [0, 150], [0, 1], [-107, 100]);
+  if (name === "velocitypid") return validatePidCommand(parts, [0, 10], [0, 100], [0, 100]);
+  if (name === "differpid") return validatePidCommand(parts, [-50, 50], [0, 1], [0, 100]);
+  if (name === "rollpid") return validatePidCommand(parts, [-100, 100], [-10, 10]);
   return `当前安全配置不允许发送命令: ${name ?? ""}`;
 }
 

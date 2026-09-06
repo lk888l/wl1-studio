@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   Boxes,
   Cpu,
@@ -10,14 +11,22 @@ import {
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Upload,
 } from "lucide-react";
+import { useState } from "react";
+
+import type { PersonalizationSettings } from "../types";
+import { PersonalizationPage } from "./pages/PersonalizationPage";
 
 interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
   launching: "wl1" | "piano" | null;
+  personalization: PersonalizationSettings;
+  personalizationPersisted: boolean;
+  onPersonalizationChange: (settings: PersonalizationSettings) => void;
   onRetrySafety: () => void;
   onOpenWl1: () => void;
   onOpenPiano: () => void;
@@ -28,10 +37,14 @@ export function ProductHome({
   safetyError,
   pianoPreviewEnabled,
   launching,
+  personalization,
+  personalizationPersisted,
+  onPersonalizationChange,
   onRetrySafety,
   onOpenWl1,
   onOpenPiano,
 }: ProductHomeProps) {
+  const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
     ? "安全检查中"
     : safetyState === "error"
@@ -53,12 +66,32 @@ export function ProductHome({
             <strong>设备控制中心</strong>
           </span>
         </div>
-        <div className="product-hub__status" role="status" aria-label="产品库状态">
-          <span className={`local-status is-${safetyState}`}><i />{safetyLabel}</span>
+        <div className="product-hub__actions">
+          <div className="product-hub__status" role="status" aria-label="产品库状态">
+            <span className={`local-status is-${safetyState}`}><i />{safetyLabel}</span>
+          </div>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={Boolean(launching)}
+            aria-controls="product-home-content"
+            onClick={() => setShowPersonalization((value) => !value)}
+          >
+            {showPersonalization ? <ArrowLeft size={17} /> : <Sparkles size={17} />}
+            {showPersonalization ? "返回产品库" : "个性设置"}
+          </button>
         </div>
       </header>
 
-      <main className="product-home">
+      <main className="product-home" id="product-home-content">
+        {showPersonalization ? (
+          <PersonalizationPage
+            settings={personalization}
+            persisted={personalizationPersisted}
+            onChange={onPersonalizationChange}
+          />
+        ) : <>
+
         <section className="product-home__hero" aria-labelledby="product-home-title">
           <div className="product-home__intro">
             <span className="section-kicker">产品库</span>
@@ -246,6 +279,7 @@ export function ProductHome({
             </button>
           </div>
         </section>
+        </>}
       </main>
 
       <footer className="product-hub__footer">

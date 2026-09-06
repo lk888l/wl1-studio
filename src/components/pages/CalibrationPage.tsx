@@ -66,7 +66,7 @@ function loadCalibrationDraft(): CalibrationDraft {
       imuRollBias: finiteInRange(value.imuRollBias, defaultDraft.imuRollBias, -180, 180),
       imuPitchBias: finiteInRange(value.imuPitchBias, defaultDraft.imuPitchBias, -180, 180),
       imuYawBias: finiteInRange(value.imuYawBias, defaultDraft.imuYawBias, -360, 360),
-      angleBias: finiteInRange(value.angleBias, defaultDraft.angleBias, 5, 20),
+      angleBias: finiteInRange(value.angleBias, defaultDraft.angleBias, -20, 20),
       legHeight: finiteInRange(value.legHeight, defaultDraft.legHeight, 44.5, 78.5),
       updatedAt: typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) && value.updatedAt >= 0
         ? value.updatedAt
@@ -183,10 +183,10 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
           {step === 2 && (
             <div className="wizard-step">
               <span className="wizard-icon"><CircleDot size={30} /></span>
-              <div className="wizard-heading"><small>ATTITUDE ZERO</small><h2>调整俯仰静态偏置</h2><p>让机身机械基准与 IMU 直立基准尽量一致。默认值来自固件基线：12.6°。</p></div>
-              <label className="calibration-slider"><span><strong>Angle bias</strong><output>{draft.angleBias.toFixed(1)}°</output></span><input type="range" min="5" max="20" step="0.1" value={draft.angleBias} onChange={(event) => setDraft((current) => ({ ...current, angleBias: Number(event.target.value) }))} /></label>
+              <div className="wizard-heading"><small>ATTITUDE ZERO</small><h2>调整俯仰静态偏置</h2><p>调整机身俯仰基准。这里保留上位机参考值 12.6°；日常重心与腿高调节可直接在运动工作台完成。</p></div>
+              <label className="calibration-slider"><span><strong>Angle bias</strong><output>{draft.angleBias.toFixed(1)}°</output></span><input type="range" min="-20" max="20" step="0.1" value={draft.angleBias} onChange={(event) => setDraft((current) => ({ ...current, angleBias: Number(event.target.value) }))} /></label>
               <div className="command-preview"><span>请求命令</span><code>anglebias {draft.angleBias.toFixed(1)}</code></div>
-              <div className="parameter-warning"><Info size={15} />HEAD 基线会周期覆写；当前本地工作树会把数值命令作为手动覆盖，直到重启或请求 auto。</div>
+              <div className="parameter-warning"><Info size={15} />参考固件将本项用于最低腿高的俯仰基准，并随腿高补偿；手动覆盖与 auto 命令仅适用于对应扩展固件。</div>
               <div className="heading-actions"><button className="secondary-button" type="button" disabled={!writesUnlocked || busy} onClick={() => void requestCommand(`anglebias ${draft.angleBias.toFixed(1)}`)}>请求手动覆盖</button><button className="text-button" type="button" disabled={!writesUnlocked || busy} onClick={() => void requestCommand("anglebias auto")}>恢复自动计算</button></div>
             </div>
           )}

@@ -34,10 +34,16 @@ The current compatibility scope has two layers: the committed HEAD baseline and 
 - Tuning values currently live only in **RAM** and are lost after restart or power-off. HEAD periodically recomputes angle `Kp`/`anglebias`; numeric commands in the current working tree enable a manual override, and `anglepid auto`/`anglebias auto` restore automatic calculation.
 - The current working tree adds a 250 ms zeroing timeout for valid `R` frames; the HEAD baseline does not. Because there is no capability handshake, the application still treats watchdog support as unknown. Stopping the desktop software is not a substitute for physical power isolation.
 - `R` can be sent only through the typed real-time control channel, not the diagnostics terminal. Every connection must explicitly choose a leg-height target, and `sessionId` isolates delayed tasks and events from older sessions.
-- The firmware has no stable version or capability-negotiation protocol. Real serial writes therefore require an independent confirmation that the device matches the two supported Legacy WL1 baselines. Without confirmation the session is read-only, and unknown commands are never sent automatically.
+- The firmware has no stable version or capability-negotiation protocol. Session-level write permissions and command allowlists remain enforced. A session without write permission is read-only, and unknown commands are never sent automatically.
 - When telemetry is requested, the frontend disarms real-time control after a channel becomes stale. Rust locks the session after a wider two-second window, repeated parse failures, or frame-boundary loss. All stream-disable commands remain best effort.
 
 See the [Firmware Integration Guide](docs/firmware-integration.md) for the complete protocol boundary.
+
+## Motion workbench
+
+WL1 opens on one motion workbench with body pitch bias, leg height, all four PID groups, direction controls, and telemetry. The inline connection bar remembers the last serial port and selects a sole available port without connecting automatically. Numeric editors and sliders share parameter drafts; connecting preserves those drafts, while motion requires an explicitly chosen height and activation. Profiles and local geometry settings are available in an expandable section.
+
+VOFA ranges and slider steps are applied consistently in the UI and TypeScript/Rust validators. See the [range and firmware reference notes](docs/motion-parameter-ranges.md) for source details and version differences.
 
 ## Technology
 

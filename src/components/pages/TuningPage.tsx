@@ -1,20 +1,9 @@
-import { AlertTriangle, Check, CloudUpload, FolderOpen, RotateCcw, Save, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CloudUpload, FolderOpen, Info, RotateCcw, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import {
-  formatParameterValue,
-  parameterDefinitions,
-  parameterGroups,
-} from "../../data/parameters";
-import type {
-  ParameterDefinition,
-  ParameterGroupId,
-  ParameterProfile,
-  ParameterValues,
-} from "../../types";
-
-const differs = (left: number | undefined, right: number | undefined): boolean =>
-  left === undefined || right === undefined || Math.abs(left - right) > 1e-9;
+import { formatParameterValue, parameterDefinitions, parameterGroups } from "../../data/parameters";
+import type { ParameterDefinition, ParameterProfile, ParameterValues } from "../../types";
+import "./TuningPage.css";
 
 interface TuningPageProps {
   connected: boolean;
@@ -26,6 +15,8 @@ interface TuningPageProps {
   profiles: readonly ParameterProfile[];
   sending: boolean;
   notice: string | null;
+  controlPanel?: ReactNode;
+  telemetryPanel?: ReactNode;
   onChange: (id: string, value: number) => void;
   onSendOne: (id: string) => void;
   onSendMany: (ids: string[]) => void;
@@ -36,117 +27,125 @@ interface TuningPageProps {
   onResetDraft: () => void;
 }
 
-function supportLabel(definition: ParameterDefinition): string {
-  if (definition.support === "supported") return "固件支持";
-  if (definition.support === "derived") return "版本相关";
-  return "接口预留";
+interface ParameterRowProps {
+  definition: ParameterDefinition;
+  value: number;
+  previous?: number;
+  requested: boolean;
+  sending: boolean;
+  unavailable: boolean;
+  onChange: (id: string, value: number) => void;
+  onSend: (id: string) => void;
+  onAuto: (id: string) => void;
+  onValidity: (id: string, valid: boolean) => void;
 }
 
-const bulkEligible = (definition: ParameterDefinition | undefined): boolean =>
-  definition?.support === "supported" && definition.id !== "legHeight";
-
-export function TuningPage({
-  connected,
-  remote = false,
-  writesUnlocked,
-  draft,
-  applied,
-  requestedIds,
-  profiles,
-  sending,
-  notice,
-  onChange,
-  onSendOne,
-  onSendMany,
-  onRestoreAuto,
-  onLoadProfile,
-  onSaveProfile,
-  onDeleteProfile,
-  onResetDraft,
-}: TuningPageProps) {
-  const [group, setGroup] = useState<ParameterGroupId>("attitude");
-  const [profileName, setProfileName] = useState("");
-  const pendingIds = useMemo(
-    () => parameterDefinitions.filter((item) => differs(draft[item.id], applied[item.id])).map((item) => item.id),
-    [applied, draft],
-  );
-  const visible = parameterDefinitions.filter((item) => item.group === group);
-  const sendablePending = pendingIds.filter((id) => bulkEligible(parameterDefinitions.find((item) => item.id === id)));
-  const groupPending = visible.filter((item) => pendingIds.includes(item.id) && bulkEligible(item)).map((item) => item.id);
+function ParameterRow({ definition, value, previous, requested, sending, unavailable, onChange, onSend, onAuto, onValidity }: ParameterRowProps) {
+  // Keep unfinished input (a minus sign, decimal point, or empty field) editable.
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const numeric = Number(text);
+  const valid = text.trim() !== "" && Number.isFinite(numeric) && numeric >= definition.min && numeric <= definition.max;
+  useEffect(() => onValidity(definition.id, valid), [definition.id, onValidity, valid]);
+  const pending = previous === undefined || Math.abs(value - previous) > 1e-9;
+  const localOnly = definition.support === "reserved";
+  const label = definition.id === "angleBias" ? "机身重心 / 俯仰偏置" : definition.label;
+  const update = (next: string): void => {
+    setText(next);
+    const number = Number(next);
+    if (next.trim() !== "" && Number.isFinite(number) && number >= definition.min && number <= definition.max) {
+      onChange(definition.id, number);
+    }
+  };
 
   return (
-    <div className="page-stack">
+    <div className={`workbench-parameter${pending ? " is-pending" : ""}`}>
+      <div className="workbench-parameter__label">
+        <label htmlFor={`parameter-${definition.id}`} title={definition.description}>{label}</label>
+        <span>{definition.symbol}</span>
+        <small title={previous === undefined ? "设备没有参数回读，显示的是本地草稿" : `最近请求 ${formatParameterValue(definition, previous)}${definition.unit ?? ""}`}>
+          {localOnly ? "仅本地" : previous === undefined ? "未下发" : pending ? "已修改" : requested ? "已请求" : "未确认"}
+        </small>
+      </div>
+      <div className="workbench-parameter__editor">
+        <div className="workbench-number">
+          <input id={`parameter-${definition.id}`} aria-label={`${label}数值`} type="number" min={definition.min} max={definition.max} step={definition.step} value={text} disabled={sending} aria-invalid={!valid} onChange={(event) => update(event.target.value)} onBlur={() => { if (valid) setText(String(numeric)); }} />
+          {definition.unit && <span>{definition.unit}</span>}
+        </div>
+        <button className="small-action" type="button" disabled={unavailable || sending || localOnly || !valid} onClick={() => onSend(definition.id)}>{localOnly ? "仅本地" : "下发"}</button>
+      </div>
+      <div className="workbench-parameter__range">
+        <input aria-label={`${label}滑块`} type="range" min={definition.min} max={definition.max} step={definition.step} value={value} disabled={sending} onChange={(event) => update(event.target.value)} />
+        <span>{definition.min} — {definition.max}{definition.unit ?? ""}</span>
+      </div>
+      {!valid && <small className="workbench-input-error" role="alert">请输入 {definition.min} 至 {definition.max} 之间的数值</small>}
+      {definition.support === "derived" && <div className="workbench-auto"><button className="text-button" type="button" disabled={unavailable || sending} onClick={() => onAuto(definition.id)}>恢复自动</button><span>自动 / 手动切换取决于固件版本</span></div>}
+    </div>
+  );
+}
+
+export function TuningPage({ connected, remote = false, writesUnlocked, draft, applied, requestedIds, profiles, sending, notice, controlPanel, telemetryPanel, onChange, onSendOne, onSendMany, onRestoreAuto, onLoadProfile, onSaveProfile, onDeleteProfile, onResetDraft }: TuningPageProps) {
+  const [editRevision, setEditRevision] = useState(0);
+  const [profileName, setProfileName] = useState("");
+  const [invalidIds, setInvalidIds] = useState<string[]>([]);
+  const onValidity = useCallback((id: string, valid: boolean): void => {
+    setInvalidIds((current) => valid ? current.includes(id) ? current.filter((item) => item !== id) : current : current.includes(id) ? current : [...current, id]);
+  }, []);
+  const pidGroups = parameterGroups.filter((group) => group.id !== "geometry");
+  const pendingPid = useMemo(() => parameterDefinitions.filter((item) => item.group !== "geometry" && item.support !== "reserved" && (applied[item.id] === undefined || Math.abs((draft[item.id] ?? item.defaultValue) - (applied[item.id] ?? 0)) > 1e-9)).map((item) => item.id), [applied, draft]);
+  const row = (definition: ParameterDefinition): ReactNode => (
+    <ParameterRow key={`${definition.id}-${editRevision}`} definition={definition} value={draft[definition.id] ?? definition.defaultValue} previous={applied[definition.id]} requested={requestedIds.includes(definition.id)} sending={sending} unavailable={!writesUnlocked || (remote && definition.id === "legHeight")} onChange={onChange} onSend={onSendOne} onAuto={onRestoreAuto} onValidity={onValidity} />
+  );
+
+  return (
+    <div className="page-stack motion-workbench">
       <section className="page-heading">
-        <div><h1>参数调校</h1><p>管理参数草稿并按组下发。Legacy 固件无读回与 ACK，“已请求”不等于设备当前值。</p></div>
+        <div><span className="section-kicker">MOTION WORKBENCH</span><h1>运动工作台</h1><p>重心、腿高、PID 与方向控制，就在这一页。</p></div>
         <div className="heading-actions">
-          <button className="secondary-button" type="button" disabled={sending} onClick={onResetDraft}><RotateCcw size={16} />重置草稿</button>
-          <button className="primary-button" type="button" disabled={!writesUnlocked || sending || sendablePending.length === 0} onClick={() => onSendMany(sendablePending)}><CloudUpload size={17} />下发待请求项 <b>{sendablePending.length}</b></button>
+          <button className="secondary-button" type="button" disabled={sending} onClick={() => { setInvalidIds([]); setEditRevision((value) => value + 1); onResetDraft(); }}><RotateCcw size={16} />重置草稿</button>
+          <button className="primary-button" type="button" disabled={!writesUnlocked || sending || pendingPid.length === 0 || invalidIds.some((id) => parameterDefinitions.find((item) => item.id === id)?.group !== "geometry")} onClick={() => onSendMany(pendingPid)}><CloudUpload size={17} />{sending ? "正在下发…" : "下发待更新 PID"}<b>{pendingPid.length}</b></button>
         </div>
       </section>
+      {notice && <div className="inline-notice" role="status"><Info size={17} />{notice}</div>}
+      {!connected && <div className="workbench-hint">在顶部选择设备并连接即可下发；离线也可以编辑参数、保存档案。</div>}
+      {connected && !writesUnlocked && <div className="readonly-banner">当前连接为只读，可查看遥测、编辑草稿和保存档案。</div>}
+      {remote && <div className="workbench-hint">遥控器模式可无线下发 PID 与重心偏置；运动和腿高使用实体摇杆，当前链路不回传遥测。</div>}
 
-      {connected && !writesUnlocked && <div className="readonly-banner"><AlertTriangle size={18} /><div><strong>当前为只读连接</strong><span>重新连接并完成协议兼容性与三项现场安全确认（共四项）后，才可下发参数；本地编辑与档案仍可使用。</span></div></div>}
-
-      {remote && <div className="readonly-banner"><AlertTriangle size={18} /><div><strong>通过遥控器无线调参</strong><span>PID 与姿态偏置发送到遥控器，再由 NRF24L01 转发到小车；串口发送成功或无线投递日志都不代表参数已执行。腿高由实体摇杆控制，参数保存在小车 RAM，重启失效。</span></div></div>}
-
-      <div className="tuning-layout">
-        <aside className="tuning-sidebar glass-card">
-          <div className="tuning-sidebar__head"><span>控制分组</span><b>{sendablePending.length} 项待请求</b></div>
-          <div className="group-tabs">
-            {parameterGroups.map((item) => {
-              const count = parameterDefinitions.filter((definition) => definition.group === item.id && pendingIds.includes(definition.id) && bulkEligible(definition)).length;
-              return <button key={item.id} type="button" className={group === item.id ? "is-active" : ""} onClick={() => setGroup(item.id)}><span><strong>{item.label}</strong><small>{item.description}</small></span>{count > 0 && <em>{count}</em>}</button>;
-            })}
-          </div>
-          <div className="capability-note"><AlertTriangle size={18} /><p><strong>兼容与范围提示</strong>滑块范围是上位机保守边界，不是固件认证安全范围；重连后设备值一律未知。Angle Kp / bias 具有版本相关的自动计算语义，腿高会直接驱动机构，三者都不进入普通批量，只能逐项明确请求。</p></div>
-        </aside>
-
-        <main className="tuning-main">
-          <div className="section-title-row"><div><span className="section-kicker">{group.toUpperCase()}</span><h2>{parameterGroups.find((item) => item.id === group)?.label}</h2></div><button className="text-button" type="button" disabled={!writesUnlocked || sending || groupPending.length === 0} onClick={() => onSendMany(groupPending)}>下发本组 {groupPending.length || ""}</button></div>
-          {notice && <div className="inline-notice"><Check size={17} />{notice}</div>}
-          <div className="parameter-list">
-            {visible.map((definition) => {
-              const value = draft[definition.id] ?? definition.defaultValue;
-              const pending = pendingIds.includes(definition.id);
-              const unknown = applied[definition.id] === undefined;
-              const dirty = !unknown && pending;
-              const remoteUnavailable = remote && definition.id === "legHeight";
+      <div className="workbench-layout">
+        <div className="workbench-settings">
+          <section className="workbench-group workbench-body glass-card" aria-label="机身重心与腿高">
+            <div className="workbench-group__heading"><div><span className="section-kicker">BODY & BALANCE</span><h2>机身与重心</h2></div><small>逐项下发，立即请求应用</small></div>
+            <div className="workbench-body__parameters">
+              {["angleBias", "legHeight"].map((id) => parameterDefinitions.find((item) => item.id === id)).filter((item): item is ParameterDefinition => Boolean(item)).map(row)}
+            </div>
+            {remote && <p className="workbench-footnote">腿高仅可编辑本地草稿；连接小车后才能下发。</p>}
+          </section>
+          <div className="workbench-pid-grid">
+            {pidGroups.map((group) => {
+              const definitions = parameterDefinitions.filter((item) => item.group === group.id);
+              const pending = definitions.filter((item) => pendingPid.includes(item.id)).map((item) => item.id);
               return (
-                <article className={`parameter-card glass-card${pending ? " is-dirty" : ""}${definition.support === "derived" ? " is-warning" : ""}`} key={definition.id}>
-                  <div className="parameter-meta">
-                    <div className="parameter-title"><span className={`support-badge is-${definition.support}`}>{supportLabel(definition)}</span><span className="dirty-badge">{unknown ? "设备值未知" : dirty ? "草稿变更" : requestedIds.includes(definition.id) ? "本次已请求" : "请求状态未知"}</span></div>
-                    <h3>{definition.label}<small>{definition.symbol}</small></h3>
-                    <p>{definition.description}</p>
-                    {definition.warning && <div className="parameter-warning"><AlertTriangle size={14} />{definition.warning}</div>}
-                    {remoteUnavailable && <div className="parameter-warning">遥控器模式由实体摇杆设置腿高；本项仅保存草稿。</div>}
-                    {definition.support === "derived" && <button className="text-button" type="button" disabled={!writesUnlocked || sending} onClick={() => onRestoreAuto(definition.id)}>请求恢复固件自动计算</button>}
-                  </div>
-                  <div className="parameter-control">
-                    <div className="parameter-value-row">
-                      <label><input aria-label={`${definition.label}数值`} type="number" min={definition.min} max={definition.max} step={definition.step} value={value} onChange={(event) => onChange(definition.id, Number(event.target.value))} /><span>{definition.unit ?? ""}</span></label>
-                      <button className="small-action" type="button" disabled={!writesUnlocked || sending || definition.support === "reserved" || remoteUnavailable} onClick={() => onSendOne(definition.id)}>{definition.support === "reserved" || remoteUnavailable ? "仅存档" : unknown ? "明确下发" : pending ? "下发" : "重发请求"}</button>
-                    </div>
-                    <input className="parameter-range" aria-label={`${definition.label}滑块`} type="range" min={definition.min} max={definition.max} step={definition.step} value={value} onChange={(event) => onChange(definition.id, Number(event.target.value))} />
-                    <div className="range-labels"><span>{formatParameterValue(definition, definition.min)}</span><em>当前 {formatParameterValue(definition, value)}{definition.unit ?? ""}</em><span>{formatParameterValue(definition, definition.max)}</span></div>
-                  </div>
-                </article>
+                <section className="workbench-group glass-card" key={group.id} aria-label={`${group.label} PID`}>
+                  <div className="workbench-group__heading"><div><h2>{group.label}</h2><p>{group.description}</p></div><button className="text-button" type="button" disabled={!writesUnlocked || sending || pending.length === 0 || definitions.some((item) => invalidIds.includes(item.id))} onClick={() => onSendMany(pending)}>下发本组</button></div>
+                  {definitions.map(row)}
+                </section>
               );
             })}
           </div>
-        </main>
+          <p className="workbench-footnote">修改数值只更新草稿，点击“下发”才发送。设备没有参数回读，“已请求”表示发送记录；参数在设备重启后失效。</p>
+        </div>
+        <aside className="workbench-live" aria-label="实时控制与反馈">{controlPanel}{telemetryPanel}</aside>
       </div>
 
-      <section className="profiles-section glass-card">
-        <div className="section-title-row"><div><span className="section-kicker">LOCAL PROFILES</span><h2>本地参数档案</h2><p>档案包含已支持与预留参数，但不会自动写入机器人 Flash。</p></div><div className="profile-save"><input value={profileName} maxLength={24} placeholder="新档案名称" onChange={(event) => setProfileName(event.target.value)} /><button className="secondary-button" type="button" disabled={!profileName.trim()} onClick={() => { onSaveProfile(profileName.trim(), `基于 ${parameterGroups.find((item) => item.id === group)?.label} 草稿`); setProfileName(""); }}><Save size={16} />保存草稿</button></div></div>
-        <div className="profile-grid">
-          {profiles.map((profile) => (
-            <article className="profile-card" key={profile.id}>
-              <div className="profile-icon"><FolderOpen size={19} /></div><div><small>{profile.builtIn ? "内置基线" : new Date(profile.updatedAt).toLocaleDateString("zh-CN")}</small><strong>{profile.name}</strong><p>{profile.description}</p></div>
-              <button className="text-button" type="button" onClick={() => onLoadProfile(profile)}>载入</button>
-              {!profile.builtIn && <button className="icon-button icon-button--danger" type="button" aria-label={`删除${profile.name}`} onClick={() => onDeleteProfile(profile.id)}><Trash2 size={16} /></button>}
-            </article>
-          ))}
+      <details className="workbench-details glass-card">
+        <summary><FolderOpen size={18} /><strong>参数档案与更多设置</strong><span>保存 / 载入 · 本地几何参数 · 参数说明</span></summary>
+        <div className="workbench-details__content">
+          <div className="section-title-row"><div><h2>本地参数档案</h2><p>载入只更新草稿，确认数值后再下发。</p></div><div className="profile-save"><input aria-label="新档案名称" value={profileName} maxLength={24} placeholder="新档案名称" disabled={sending} onChange={(event) => setProfileName(event.target.value)} /><button className="secondary-button" type="button" disabled={sending || invalidIds.length > 0 || !profileName.trim()} onClick={() => { onSaveProfile(profileName.trim(), "运动工作台参数草稿"); setProfileName(""); }}><Save size={16} />保存草稿</button></div></div>
+          <div className="profile-grid">{profiles.map((profile) => <article className="profile-card" key={profile.id}><div className="profile-icon"><FolderOpen size={19} /></div><div><small>{profile.builtIn ? "内置参考" : new Date(profile.updatedAt).toLocaleDateString("zh-CN")}</small><strong>{profile.name}</strong><p>{profile.description}</p></div><button className="text-button" type="button" disabled={sending} onClick={() => { setInvalidIds([]); setEditRevision((value) => value + 1); onLoadProfile(profile); }}>载入</button>{!profile.builtIn && <button className="icon-button icon-button--danger" type="button" aria-label={`删除${profile.name}`} disabled={sending} onClick={() => onDeleteProfile(profile.id)}><Trash2 size={16} /></button>}</article>)}</div>
+          <div className="workbench-local-parameters">{parameterDefinitions.filter((item) => item.group === "geometry" && item.id !== "angleBias" && item.id !== "legHeight").map(row)}</div>
+          <details className="workbench-parameter-help"><summary>查看参数用途与固件说明</summary><dl>{parameterDefinitions.filter((item) => item.support !== "reserved").map((item) => <div key={item.id}><dt>{item.label} · {item.symbol}</dt><dd>{item.description}{item.warning && ` ${item.warning}`}</dd></div>)}</dl></details>
         </div>
-      </section>
+      </details>
     </div>
   );
 }
