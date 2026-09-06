@@ -2,8 +2,8 @@ use tauri::{AppHandle, State};
 
 use crate::state::AppState;
 use crate::types::{
-    ConnectionRequestMode, ConnectionSnapshot, DeviceCapabilities, MotionTargetRequest,
-    SerialConfig, SerialPortOption,
+    ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget, DeviceCapabilities,
+    MotionTargetRequest, SerialConfig, SerialPortOption,
 };
 
 #[tauri::command]
@@ -74,7 +74,13 @@ pub fn connect_device(
                 .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
-            state.connect_serial(app, port_name, config.baud_rate, config.allow_unsafe_writes)
+            state.connect_serial(
+                app,
+                port_name,
+                config.baud_rate,
+                config.allow_unsafe_writes,
+                config.connection_target,
+            )
         }
     }
 }
@@ -125,6 +131,6 @@ pub fn connection_snapshot(state: State<'_, AppState>) -> Result<ConnectionSnaps
 }
 
 #[tauri::command]
-pub fn device_capabilities() -> DeviceCapabilities {
-    DeviceCapabilities::legacy_ascii()
+pub fn device_capabilities(connection_target: Option<ConnectionTarget>) -> DeviceCapabilities {
+    DeviceCapabilities::for_target(connection_target.unwrap_or_default())
 }

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import type { ConnectionSnapshot, PageId } from "../types";
+import { isRemoteConnection } from "../lib/connection";
 
 const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
   { id: "overview", label: "总览", icon: Activity },
@@ -31,6 +32,7 @@ interface SidebarProps {
 }
 export function Sidebar({ page, robotName, connection, onPageChange, onConnectionOpen }: SidebarProps) {
   const connected = connection.mode !== "disconnected";
+  const remote = isRemoteConnection(connection);
   return (
     <aside className="sidebar glass-panel" aria-label="主导航">
       <div className="brand-lockup">
@@ -65,8 +67,8 @@ export function Sidebar({ page, robotName, connection, onPageChange, onConnectio
       <button className="sidebar-device" type="button" onClick={onConnectionOpen}>
         <span className={`status-orb${connected ? " is-online" : ""}`} />
         <span className="sidebar-device__copy">
-          <small>{connected ? "当前设备" : "设备连接"}</small>
-          <strong>{connected ? robotName : "点击建立连接"}</strong>
+          <small>{remote ? "无线调参 · 串口已打开" : connected ? "当前设备" : "设备连接"}</small>
+          <strong>{remote ? "WL1 遥控器" : connected ? robotName : "点击建立连接"}</strong>
           <span>{connection.label}</span>
         </span>
         <Radio size={17} />

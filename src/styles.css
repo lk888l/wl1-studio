@@ -462,7 +462,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 /* Connection modal */
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgba(30,46,73,.22); backdrop-filter: blur(12px); animation: fade-in .2s ease; }
 @keyframes fade-in { from { opacity: 0; } }
-.connection-modal { width: min(620px, 100%); max-height: calc(100vh - 40px); padding: 22px; overflow: auto; border-radius: var(--radius-xl); box-shadow: 0 40px 110px rgba(32,52,87,.25), inset 0 1px white; }
+.connection-modal { width: min(620px, 100%); max-height: calc(100vh - 40px); padding: 22px; overflow: auto; overscroll-behavior: contain; border-radius: var(--radius-xl); box-shadow: 0 40px 110px rgba(32,52,87,.25), inset 0 1px white; }
+.connection-modal:focus { outline: none; }
 .modal-header { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; }
 .modal-header h2 { margin-top: 5px; font-size: 26px; letter-spacing: -.04em; }
 .modal-header p { margin-top: 7px; color: var(--muted); font-size: 12px; }
@@ -472,6 +473,23 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 .mode-switch strong, .mode-switch small { display: block; }
 .mode-switch strong { font-size: 12px; }
 .mode-switch small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.connection-method-picker, .connection-target-picker { min-width: 0; padding: 0; border: 0; }
+.connection-target-picker { margin: 0; }
+.connection-target-picker legend { padding: 0; color: var(--muted); font-size: 11px; }
+.connection-target-picker .mode-switch { margin-top: 7px; }
+.connection-target-note { padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 13px; background: var(--accent-soft); }
+.connection-target-note strong { color: var(--accent-deep); font-size: 12px; }
+.connection-target-note p { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.connection-delivery-note { display: flex; gap: 9px; align-items: flex-start; margin-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.connection-delivery-note svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
+.remote-capabilities { padding: 24px; }
+.remote-capabilities-heading { display: flex; gap: 15px; align-items: flex-start; }
+.remote-capabilities-heading > svg { flex: 0 0 auto; margin-top: 4px; color: var(--accent); }
+.remote-capabilities h2 { margin-top: 5px; font-size: 20px; }
+.remote-capabilities p { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.remote-capability-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; margin-top: 22px; }
+.remote-capability-grid article { padding: 18px; border: 1px solid rgba(103,126,164,.12); border-radius: 15px; background: rgba(255,255,255,.42); }
+.remote-capability-grid strong { font-size: 13px; }
 .mock-device-preview { display: flex; gap: 15px; align-items: center; margin-top: 14px; padding: 17px; border: 1px solid rgba(103,126,164,.11); border-radius: 16px; background: linear-gradient(135deg, rgba(255,255,255,.56), var(--accent-soft)); }
 .mock-orbit { display: grid; width: 56px; height: 56px; flex: 0 0 auto; place-items: center; color: var(--accent-deep); border: 1px solid rgba(255,255,255,.7); border-radius: 50%; background: rgba(255,255,255,.5); box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 13%, transparent); }
 .mock-device-preview strong { font-size: 12px; }
@@ -502,7 +520,8 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 .signal-bars i:nth-child(1) { height: 5px; }.signal-bars i:nth-child(2) { height: 9px; }.signal-bars i:nth-child(3) { height: 13px; }.signal-bars i:nth-child(4) { height: 17px; }
 .modal-actions { display: flex; gap: 13px; align-items: center; justify-content: space-between; margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(103,126,164,.11); }
 .modal-actions > span { display: flex; gap: 7px; align-items: center; color: var(--muted); font-size: 10px; }
-.safety-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); }
+.modal-actions button { flex-shrink: 0; white-space: nowrap; }
+.safety-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--mint); }
 
 /* Native leg kinematics lab */
 .kinematics-page { --kinematics-stage: #111c30; }
@@ -723,7 +742,7 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 
 /* Product-to-workspace transition */
 .app-stage { min-height: 100vh; overflow-x: clip; }
-.app-shell { animation: workspace-enter .52s cubic-bezier(.2,.8,.2,1) both; }
+.app-shell { animation: workspace-enter .52s cubic-bezier(.2,.8,.2,1) backwards; }
 @keyframes workspace-enter {
   from { opacity: 0; transform: scale(.985); }
   to { opacity: 1; transform: scale(1); }

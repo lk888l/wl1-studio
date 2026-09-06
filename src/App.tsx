@@ -28,6 +28,7 @@ import {
   parameterDefinitions,
 } from "./data/parameters";
 import { deviceGateway, motionCommand } from "./lib/device";
+import { isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
 import { appendTelemetrySample, telemetryChannelFresh } from "./lib/telemetry";
 import {
   defaultPersonalization,
@@ -266,6 +267,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
   const parameterOperation = useRef(0);
 
   const connected = connection.mode !== "disconnected";
+  const remote = isRemoteConnection(connection);
   const writesUnlocked = connected && connection.writesUnlocked;
   const activeSessionId = connection.sessionId;
   const latest = samples.at(-1);
@@ -342,10 +344,10 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
   useEffect(() => {
     // Nothing can become stale while disconnected. Avoid waking and
     // re-rendering the whole product hub four times per second while idle.
-    if (!connected) return;
+    if (!connected || remote) return;
     const timer = window.setInterval(() => setFreshnessNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [connected]);
+  }, [connected, remote]);
 
   const refreshPorts = useCallback(async (): Promise<void> => {
     setConnectionBusy(true);
@@ -387,7 +389,9 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
       setAppliedParameters({});
       setRequestedParameterIds([]);
       setMotionHeight(snapshot.mode === "mock" ? { value: 61.5, requested: true } : null);
-      setParameterNotice("已进入新设备会话：草稿已回到上位机默认参考，所有设备参数仍视为未知。");
+      setParameterNotice(isRemoteConnection(snapshot)
+        ? "已打开遥控器串口：可发送 PID 与姿态偏置；需桥接固件，无法确认小车在线或参数生效。"
+        : "已进入新设备会话：草稿已回到上位机默认参考，所有设备参数仍视为未知。");
       setConnection(snapshot);
       if (snapshot.mode === "mock") {
         await deviceGateway.setTelemetry({ imu: true, rpm: true });
@@ -398,6 +402,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
         setTelemetryEnabled(false);
       }
       setConnectionOpen(false);
+      if (isRemoteConnection(snapshot)) setPage("tuning");
     } catch (reason) {
       setConnection(deviceGateway.connection);
       if (deviceGateway.connection.mode === "disconnected") {
@@ -509,15 +514,15 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
         if (parameterOperation.current !== operationId) throw new Error("页面或设备状态已变化，旧批量任务已取消");
         recordParameterRequest(command);
         sent += 1;
-        await delay(120);
+        await delay(REMOTE_COMMAND_INTERVAL_MS);
       }
-      setParameterNotice(`已按 120 ms 间隔发送 ${sent} 项请求，避免挤满固件 4 深度命令队列。`);
+      setParameterNotice(`已按至少 ${REMOTE_COMMAND_INTERVAL_MS} ms 间隔发送 ${sent} 项请求；${remote ? "已写入遥控器串口，小车是否执行仍未知。" : "Legacy 固件无 ACK，设备值仍需人工验证。"}`);
     } catch (reason) {
       setParameterNotice(`批量发送在第 ${sent + 1} 项中止：${reason instanceof Error ? reason.message : String(reason)}`);
     } finally {
       setParameterSending(false);
     }
-  }, [activeSessionId, draftParameters, recordParameterRequest]);
+  }, [activeSessionId, draftParameters, recordParameterRequest, remote]);
 
   const restoreAutomaticParameter = useCallback(async (id: string): Promise<void> => {
     const command = id === "angleKp" ? "anglepid auto" : id === "angleBias" ? "anglebias auto" : null;
@@ -623,7 +628,7 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
             <span className="topbar-clock"><Clock3 size={15} />{new Date().toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</span>
             <button className="icon-button" type="button" aria-label="帮助"><CircleHelp size={18} /></button>
             <button className="icon-button notification-button" type="button" aria-label="通知"><Bell size={18} /><i /></button>
-            <button className={connected ? "connection-button is-online" : startupError ? "connection-button is-fault" : "connection-button"} type="button" onClick={openConnection}><span className="status-orb" /><div><small>{connected ? "CONNECTED" : startupError ? "SAFETY LOCKED" : "OFFLINE"}</small><strong>{startupError ? "需要人工确认" : connection.label}</strong></div><Cable size={17} /></button>
+            <button className={connected ? "connection-button is-online" : startupError ? "connection-button is-fault" : "connection-button"} type="button" onClick={openConnection}><span className="status-orb" /><div><small>{remote ? "REMOTE SERIAL OPEN" : connected ? "CONNECTED" : startupError ? "SAFETY LOCKED" : "OFFLINE"}</small><strong>{startupError ? "需要人工确认" : connection.label}</strong></div><Cable size={17} /></button>
           </div>
         </header>
 
@@ -636,11 +641,20 @@ function Wl1Studio({ onBack }: Wl1StudioProps) {
         )}
 
         <main className="page-content">
+          {remote && (page === "control" || page === "calibration") && (
+            <div className="page-stack">
+              <section className="page-heading"><div><h1>{currentMeta.label}</h1><p>当前通过遥控器进行无线调参。</p></div></section>
+              <section className="glass-card capability-note">
+                <Cable size={24} />
+                <div><h2>{page === "control" ? "运动由实体遥控器控制" : "标定需要直连小车"}</h2><p>{page === "control" ? "遥控器持续发送摇杆目标，运动与腿高请在遥控器上操作。使用电脑实时控制时，请断开后切换为直连小车。" : "当前无线桥接没有 IMU / RPM 回传。请直连小车采样标定；PID 与姿态偏置仍可在参数调校页无线下发。"}</p><button className="primary-button" type="button" onClick={() => navigate("tuning")}>前往无线调参</button></div>
+              </section>
+            </div>
+          )}
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
           {page === "kinematics" && <KinematicsPage />}
-          {page === "tuning" && <TuningPage connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => setDraftParameters(mergeKnownParameterValues(appliedParameters))} />}
-          {page === "control" && <ControlPage key={`${activeSessionId ?? "disconnected"}-${connectionOpen || parameterSending ? "suspended" : "ready"}`} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionOpen || connectionBusy || parameterSending || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
-          {page === "calibration" && <CalibrationPage connected={connected} writesUnlocked={writesUnlocked} samples={imuFresh ? samples : []} onSendText={sendText} />}
+          {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => setDraftParameters(mergeKnownParameterValues(appliedParameters))} />}
+          {page === "control" && !remote && <ControlPage key={`${activeSessionId ?? "disconnected"}-${connectionOpen || parameterSending ? "suspended" : "ready"}`} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionOpen || connectionBusy || parameterSending || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
+          {page === "calibration" && !remote && <CalibrationPage connected={connected} writesUnlocked={writesUnlocked} samples={imuFresh ? samples : []} onSendText={sendText} />}
           {page === "personalization" && <PersonalizationPage settings={personalization} persisted={personalizationPersisted} onChange={updatePersonalization} />}
           {page === "diagnostics" && <DiagnosticsPage connection={connection} entries={consoleEntries} telemetryEnabled={telemetryEnabled} writesUnlocked={writesUnlocked} onSend={sendText} onTelemetryChange={setTelemetry} onClear={() => setConsoleEntries([])} onConnectionOpen={openConnection} />}
         </main>

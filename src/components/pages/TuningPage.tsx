@@ -18,6 +18,7 @@ const differs = (left: number | undefined, right: number | undefined): boolean =
 
 interface TuningPageProps {
   connected: boolean;
+  remote?: boolean;
   writesUnlocked: boolean;
   draft: ParameterValues;
   applied: Partial<ParameterValues>;
@@ -46,6 +47,7 @@ const bulkEligible = (definition: ParameterDefinition | undefined): boolean =>
 
 export function TuningPage({
   connected,
+  remote = false,
   writesUnlocked,
   draft,
   applied,
@@ -84,6 +86,8 @@ export function TuningPage({
 
       {connected && !writesUnlocked && <div className="readonly-banner"><AlertTriangle size={18} /><div><strong>当前为只读连接</strong><span>重新连接并完成协议兼容性与三项现场安全确认（共四项）后，才可下发参数；本地编辑与档案仍可使用。</span></div></div>}
 
+      {remote && <div className="readonly-banner"><AlertTriangle size={18} /><div><strong>通过遥控器无线调参</strong><span>PID 与姿态偏置发送到遥控器，再由 NRF24L01 转发到小车；串口发送成功或无线投递日志都不代表参数已执行。腿高由实体摇杆控制，参数保存在小车 RAM，重启失效。</span></div></div>}
+
       <div className="tuning-layout">
         <aside className="tuning-sidebar glass-card">
           <div className="tuning-sidebar__head"><span>控制分组</span><b>{sendablePending.length} 项待请求</b></div>
@@ -105,6 +109,7 @@ export function TuningPage({
               const pending = pendingIds.includes(definition.id);
               const unknown = applied[definition.id] === undefined;
               const dirty = !unknown && pending;
+              const remoteUnavailable = remote && definition.id === "legHeight";
               return (
                 <article className={`parameter-card glass-card${pending ? " is-dirty" : ""}${definition.support === "derived" ? " is-warning" : ""}`} key={definition.id}>
                   <div className="parameter-meta">
@@ -112,12 +117,13 @@ export function TuningPage({
                     <h3>{definition.label}<small>{definition.symbol}</small></h3>
                     <p>{definition.description}</p>
                     {definition.warning && <div className="parameter-warning"><AlertTriangle size={14} />{definition.warning}</div>}
+                    {remoteUnavailable && <div className="parameter-warning">遥控器模式由实体摇杆设置腿高；本项仅保存草稿。</div>}
                     {definition.support === "derived" && <button className="text-button" type="button" disabled={!writesUnlocked || sending} onClick={() => onRestoreAuto(definition.id)}>请求恢复固件自动计算</button>}
                   </div>
                   <div className="parameter-control">
                     <div className="parameter-value-row">
                       <label><input aria-label={`${definition.label}数值`} type="number" min={definition.min} max={definition.max} step={definition.step} value={value} onChange={(event) => onChange(definition.id, Number(event.target.value))} /><span>{definition.unit ?? ""}</span></label>
-                      <button className="small-action" type="button" disabled={!writesUnlocked || sending || !pending || definition.support === "reserved"} onClick={() => onSendOne(definition.id)}>{definition.support === "reserved" ? "仅存档" : unknown ? "明确下发" : "下发"}</button>
+                      <button className="small-action" type="button" disabled={!writesUnlocked || sending || definition.support === "reserved" || remoteUnavailable} onClick={() => onSendOne(definition.id)}>{definition.support === "reserved" || remoteUnavailable ? "仅存档" : unknown ? "明确下发" : pending ? "下发" : "重发请求"}</button>
                     </div>
                     <input className="parameter-range" aria-label={`${definition.label}滑块`} type="range" min={definition.min} max={definition.max} step={definition.step} value={value} onChange={(event) => onChange(definition.id, Number(event.target.value))} />
                     <div className="range-labels"><span>{formatParameterValue(definition, definition.min)}</span><em>当前 {formatParameterValue(definition, value)}{definition.unit ?? ""}</em><span>{formatParameterValue(definition, definition.max)}</span></div>

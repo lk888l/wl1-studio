@@ -8,6 +8,7 @@ export type PageId =
   | "diagnostics";
 
 export type ConnectionMode = "disconnected" | "mock" | "serial";
+export type ConnectionTarget = "robot" | "remote";
 
 export interface SerialPortOption {
   name: string;
@@ -21,6 +22,7 @@ export interface SerialPortOption {
 
 export interface SerialConfig {
   mode: "mock" | "serial";
+  connectionTarget?: ConnectionTarget;
   portName?: string;
   baudRate: number;
   allowUnsafeWrites: boolean;
@@ -28,6 +30,7 @@ export interface SerialConfig {
 
 export interface ConnectionSnapshot {
   mode: ConnectionMode;
+  connectionTarget?: ConnectionTarget;
   label: string;
   sessionId?: number;
   connectedAt?: number;

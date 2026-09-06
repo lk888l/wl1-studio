@@ -12,6 +12,7 @@ import type {
   TelemetrySubscription,
 } from "../types";
 import { buildMotionCommand, validateFirmwareCommand } from "./protocol";
+import { isRemoteConnection, REMOTE_MOTION_UNAVAILABLE, REMOTE_TELEMETRY_UNAVAILABLE } from "./connection";
 import { mergeTelemetrySample } from "./telemetry";
 
 declare global {
@@ -142,6 +143,7 @@ export class DeviceGateway {
       this.mockMotion = { turn: 0, velocity: 0, roll: 0, height: 61.5 };
       this.snapshot = {
         mode: "mock",
+        connectionTarget: "robot",
         label: "浏览器仿真 · WL1-MOCK-01",
         sessionId: ++this.browserSessionSequence,
         connectedAt: Date.now(),
@@ -166,6 +168,7 @@ export class DeviceGateway {
       const backendSnapshot = await invoke<ConnectionSnapshot>("connect_device", {
         config: {
           mode: config.mode,
+          connectionTarget: config.mode === "serial" ? config.connectionTarget ?? "robot" : "robot",
           portName: config.portName,
           baudRate: config.baudRate,
           allowUnsafeWrites: config.mode === "mock" || config.allowUnsafeWrites,
@@ -174,6 +177,7 @@ export class DeviceGateway {
       this.snapshot = {
         ...backendSnapshot,
         mode: backendSnapshot.mode,
+        connectionTarget: backendSnapshot.connectionTarget ?? "robot",
         label: backendSnapshot.label || (config.mode === "mock" ? "WL1-MOCK-01" : config.portName ?? "WL1"),
         sessionId: backendSnapshot.sessionId,
         connectedAt: backendSnapshot.connectedAt ?? Date.now(),
@@ -223,7 +227,7 @@ export class DeviceGateway {
   }
 
   async sendTextCommand(command: string, expectedSessionId?: number): Promise<void> {
-    const error = validateFirmwareCommand(command);
+    const error = validateFirmwareCommand(command, isRemoteConnection(this.snapshot) ? "remote" : "robot");
     if (error) throw new Error(error);
     const sessionId = this.requireWritableSession(expectedSessionId);
     const trimmed = command.trim();
@@ -237,6 +241,7 @@ export class DeviceGateway {
   }
 
   async sendMotionTarget(target: MotionTarget, expectedSessionId?: number): Promise<void> {
+    if (isRemoteConnection(this.snapshot)) throw new Error(REMOTE_MOTION_UNAVAILABLE);
     const command = buildMotionCommand(target);
     const sessionId = this.requireWritableSession(expectedSessionId);
     if (isTauriRuntime()) {
@@ -250,6 +255,9 @@ export class DeviceGateway {
 
   async setTelemetry(next: TelemetrySubscription, expectedSessionId?: number): Promise<void> {
     const sessionId = this.requireSession(expectedSessionId);
+    if (isRemoteConnection(this.snapshot) && (next.imu || next.rpm)) {
+      throw new Error(REMOTE_TELEMETRY_UNAVAILABLE);
+    }
     if (isTauriRuntime()) {
       await invoke("set_telemetry", {
         enabled: next.imu || next.rpm,
@@ -367,6 +375,7 @@ export class DeviceGateway {
       const telemetryUnlisten = await listen<TelemetryPayload>("wl1://telemetry", ({ payload }) => {
         const eventSessionId = numeric(payload.sessionId ?? payload.session_id);
         if (eventSessionId === undefined || eventSessionId !== this.snapshot.sessionId) return;
+        if (isRemoteConnection(this.snapshot)) return;
         const patch: Partial<TelemetrySample> = {};
         const timestamp = numeric(payload.timestamp);
         const roll = numeric(payload.roll);
