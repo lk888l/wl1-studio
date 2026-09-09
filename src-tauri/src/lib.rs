@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod gamebox;
 mod protocol;
 mod state;
 mod transport;
@@ -37,6 +38,8 @@ pub fn run() {
     refuse_linux_root_execution();
     tauri::Builder::default()
         .manage(state::AppState::default())
+        .manage(gamebox::GameBoxState::default())
+        .manage(commands::ProductSessionLifecycle::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_serial_ports,
             commands::connect_device,
@@ -46,6 +49,9 @@ pub fn run() {
             commands::set_telemetry,
             commands::connection_snapshot,
             commands::device_capabilities,
+            commands::gamebox_connect,
+            commands::gamebox_disconnect,
+            commands::gamebox_snapshot,
         ])
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
@@ -55,7 +61,14 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 let state = app.state::<state::AppState>();
+                let gamebox = app.state::<gamebox::GameBoxState>();
+                let lifecycle = app.state::<commands::ProductSessionLifecycle>();
+                let _lifecycle = lifecycle
+                    .0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
                 let _ = state.disconnect(None);
+                let _ = gamebox.disconnect(None);
             }
         });
 }

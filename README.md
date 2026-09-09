@@ -2,7 +2,7 @@
 
 **简体中文** | [English](README.en.md)
 
-本仓库实现一套可扩展的多产品桌面上位机。软件启动后先进入产品首页，再进入对应产品的连接、遥测、调参和诊断工作台；当前首个且唯一完成设备协议接入的产品是 **WL1 轮腿小车**，其工作台名称为 **WL1 Studio（WL1 控制中心）**。口袋电子琴目前仅保留交互预览，生产构建默认关闭入口，不能被误认为真实硬件能力。项目采用 Tauri + React 技术路线，不依赖额外仓库或 Git 子模块，并以最小权限、可替换通信层和可审计发布流程为目标。
+本仓库实现一套可扩展的多产品桌面上位机。软件启动后先进入产品首页，再进入独立产品工作台：**WL1 轮腿小车**提供连接、遥测与调参，**GameBox 游戏机**提供真实串口只读诊断、按键可视化、游戏与工具图鉴，以及本地固件检查。GameBox 串口链路仍待实机联调，当前固件不支持下行控制或串口升级。口袋电子琴目前仅保留交互预览，生产构建默认关闭入口。项目采用 Tauri + React 技术路线，不依赖额外仓库或 Git 子模块，并以最小权限、可替换通信层和可审计发布流程为目标。
 
 > [!WARNING]
 > 轮腿机器人可能因错误参数、协议误判或通信异常突然运动。首次连接和每次调参前，请先阅读[安全指南](docs/safety.md)，架空驱动轮、准备物理急停，并确保人员远离运动范围。本软件不是安全控制器，不能替代固件侧限幅、看门狗和急停电路。
@@ -13,15 +13,22 @@
 
 范围及滑块步长同步 VOFA，TypeScript 与 Rust 使用相同命令边界。参考配置和已核实的固件版本差异见[运动参数范围说明](docs/motion-parameter-ranges.md)。
 
+## GameBox 游戏机工作台
+
+从产品首页进入 GameBox，通过 **115200 / 8N1** 串口接收实体按键事件，查看八键状态、事件类型和日志；六款游戏与六项工具图鉴说明设备端操作，桌面和浏览器均提供明确标注的无硬件演示。串口只读，不发送探测或控制命令。
+
+本地 `.bin` 检查显示大小、CRC-32、初始栈指针和复位向量，按 F103C8 的 **62 KiB 程序区 + 2 KiB 设置区**判断容量。检查不认证固件身份，也不授权或执行烧录；当前固件仍通过 SWD 更新。后续外置 SPI Flash 将用于保存多个固件包，串口传输与 bootloader 均属规划；普通 SPI NOR 不能让 F103 直接执行更大的单个固件，bootloader 还会占用内部 Flash。协议、源码基线、容量边界和实机验证项见 [GameBox 接入指南](docs/gamebox-integration.md)。
+
 ## 当前定位
 
 WL1 工作台现可选择 **直连小车** 或 **通过遥控器无线调参**。遥控器模式支持 PID 与姿态偏置下发，需要先更新遥控器串口桥接固件；原版固件没有启动串口 RX。接线、使用步骤与回传限制见[遥控器无线调参指南](docs/remote-tuning.md)。下文 Legacy 遥测与 idle 分帧说明适用于直连小车。
 
-当前代码已经形成“产品首页 + 独立产品工作台 + Rust 设备网关”的跨平台骨架。WL1 兼容层同时核对了 `feature/framework@8f8eb82` 的提交基线，以及 2026-08-24 本地固件工作树中尚未提交的控制/通信演进；界面仍可依靠 Mock 数据独立开发。未来新增产品时应实现自己的协议、Transport、页面与安全策略，未完成后端和实机验证的工作台必须保持预览状态。
+当前代码已经形成“产品首页 + 独立产品工作台 + Rust 设备网关”的跨平台骨架。WL1 兼容层同时核对了 `feature/framework@8f8eb82` 的提交基线，以及 2026-08-24 本地固件工作树中尚未提交的控制/通信演进；GameBox 独立接收 `FW2` 按键文本协议。界面仍可依靠 Mock 或演示数据独立开发。新增产品应实现自己的协议、Transport、页面与安全策略，并明确区分真实接口、无硬件演示和待实机验证的范围。
 
 当前首版已经覆盖的核心场景包括：
 
-- 产品首页启动时先清理遗留设备会话，再选择 WL1 轮腿小车；仅在当前会话安全结束后返回产品库；
+- 产品首页启动时先清理遗留设备会话，再选择 WL1 轮腿小车或 GameBox 游戏机；仅在当前会话结束后返回产品库；
+- GameBox 串口按键诊断、六游戏与六工具图鉴、本地 `.bin` 容量/向量/CRC-32 检查；
 - 连接串口设备并显示连接状态、静态 Legacy 兼容描述，以及 IMU/RPM 分通道遥测新鲜度；
 - 观察 IMU 与左右轮 RPM：`showimu -y/-n`、`showrpm -y/-n`；
 - 调整四组 PID 和 `legheight`，并通过 `R <turn> <velocity> <roll> <height>` 发送组合运动目标；
@@ -79,7 +86,7 @@ npm run check
 npm run tauri dev
 ```
 
-只开发界面时运行 `npm run dev` 并使用 WL1 Mock。Linux 打包运行：
+只开发界面时运行 `npm run dev` 并使用 WL1 Mock 或 GameBox 体验演示；真实串口需要 Tauri 桌面运行时。Linux 打包运行：
 
 ```bash
 npm run bundle:linux
@@ -98,6 +105,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 ├── docs/
 │   ├── architecture.md          # 分层、状态与版本策略
 │   ├── firmware-integration.md  # WL1 固件与传输接入约定
+│   ├── gamebox-integration.md   # GameBox 只读串口、固件检查与外存规划
 │   ├── linux.md                 # Ubuntu 24.04 开发、运行与打包
 │   ├── release.md               # 跨平台发布、签名与门禁
 │   ├── security-audit.md        # 安全审计和残余风险
@@ -122,6 +130,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 
 - [系统架构](docs/architecture.md)
 - [固件接入](docs/firmware-integration.md)
+- [GameBox 游戏机接入](docs/gamebox-integration.md)
 - [Ubuntu 24.04 指南](docs/linux.md)
 - [开发指南](docs/development.md)
 - [发布规范](docs/release.md)

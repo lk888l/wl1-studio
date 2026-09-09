@@ -6,6 +6,9 @@ import {
   Boxes,
   Cpu,
   Gauge,
+  Gamepad2,
+  Cable,
+  FileCode2,
   Keyboard,
   Music2,
   RefreshCw,
@@ -23,13 +26,14 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | null;
+  launching: "wl1" | "piano" | "gamebox" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
   onRetrySafety: () => void;
   onOpenWl1: () => void;
   onOpenPiano: () => void;
+  onOpenGameBox: () => void;
 }
 
 export function ProductHome({
@@ -43,6 +47,7 @@ export function ProductHome({
   onRetrySafety,
   onOpenWl1,
   onOpenPiano,
+  onOpenGameBox,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -116,10 +121,59 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>1 个设备已接入 · 1 个交互预览</span>
+            <span>2 个设备工作台 · 1 个交互预览</span>
           </div>
 
           <div className="product-catalog__layout">
+            <button
+              className={`product-card product-card--gamebox glass-card liquid-card is-${safetyState}${launching === "gamebox" ? " is-launching" : ""}`}
+              type="button"
+              disabled={safetyState !== "ready" || Boolean(launching)}
+              aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
+              onClick={onOpenGameBox}
+            >
+              <span className="product-card__visual" aria-hidden="true">
+                <span className="product-card__model">STM32 GAMEBOX</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="hubGameBoxBody" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stopColor="#fbfef6" />
+                      <stop offset="1" stopColor="#cadbca" />
+                    </linearGradient>
+                  </defs>
+                  <ellipse cx="260" cy="267" rx="160" ry="16" fill="#255c48" opacity=".12" />
+                  <rect x="91" y="38" width="338" height="222" rx="44" fill="url(#hubGameBoxBody)" stroke="#fff" strokeWidth="4" />
+                  <rect x="157" y="61" width="206" height="121" rx="17" fill="#294d40" />
+                  <rect x="171" y="73" width="178" height="97" rx="6" fill="#c2d5a0" />
+                  <g fill="#405b35">
+                    <path d="M191 149v-18h14v-14h14v14h14v-14h14v14h14v18h-14v-5h-42v5z" />
+                    <path d="M204 103h7v7h-7zm14 0h7v7h-7zm63 24h7v22h-7zm-7 7h21v7h-21zm40-44h7v7h-7zm11 11h7v7h-7z" />
+                    <path d="M185 156h150v3H185z" />
+                  </g>
+                  <path d="M132 199h15v-15h16v15h15v16h-15v15h-16v-15h-15z" fill="#3a5149" />
+                  <circle cx="344" cy="218" r="13" fill="#428c71" stroke="#fff" strokeWidth="2" />
+                  <circle cx="378" cy="196" r="13" fill="#da8f59" stroke="#fff" strokeWidth="2" />
+                  <rect x="219" y="224" width="28" height="8" rx="4" fill="#829b8b" />
+                  <rect x="263" y="224" width="28" height="8" rx="4" fill="#829b8b" />
+                </svg>
+              </span>
+              <span className="product-card__body">
+                <span className="product-card__meta"><span className="product-available"><i />串口只读接入</span></span>
+                <span className="product-card__title"><strong>GameBox 游戏机</strong></span>
+                <span className="product-card__description">查看实体按键与串口日志，浏览游戏图鉴，为下一版固件做好准备。</span>
+                <span className="product-card__features">
+                  <span><Gamepad2 size={15} />按键监视</span>
+                  <span><Cable size={15} />串口日志</span>
+                  <span><FileCode2 size={15} />固件检查</span>
+                </span>
+                <span className="product-card__action">
+                  <strong>{launching === "gamebox" ? "正在打开工作台…"
+                    : safetyState === "checking" ? "正在准备设备会话…"
+                      : safetyState === "error" ? "等待安全检查通过" : "进入 GameBox 工作台"}</strong>
+                  <ArrowRight size={21} />
+                </span>
+              </span>
+            </button>
             <button
               className={`product-card glass-card liquid-card is-${safetyState}${launching === "wl1" ? " is-launching" : ""}`}
               type="button"

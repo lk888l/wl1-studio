@@ -1,10 +1,16 @@
 use tauri::{AppHandle, State};
 
+use crate::gamebox::{GameBoxSnapshot, GameBoxState};
 use crate::state::AppState;
 use crate::types::{
     ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget, DeviceCapabilities,
     MotionTargetRequest, SerialConfig, SerialPortOption,
 };
+
+/// Serializes product switches across both independently owned backends.
+/// Order: product lifecycle -> one product's lifecycle -> its session state.
+#[derive(Default)]
+pub struct ProductSessionLifecycle(pub std::sync::Mutex<()>);
 
 #[tauri::command]
 pub fn list_serial_ports() -> Result<Vec<SerialPortOption>, String> {
@@ -59,10 +65,16 @@ fn ensure_serial_port_available(port_name: &str) -> Result<(), String> {
 pub fn connect_device(
     app: AppHandle,
     state: State<'_, AppState>,
+    gamebox: State<'_, GameBoxState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
     config: SerialConfig,
 ) -> Result<ConnectionSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
     match config.mode {
-        ConnectionRequestMode::Mock => state.connect_mock(app),
+        ConnectionRequestMode::Mock => {
+            gamebox.disconnect(None)?;
+            state.connect_mock(app)
+        }
         ConnectionRequestMode::Serial => {
             if config.baud_rate != 115_200 {
                 return Err("WL1 Legacy 固件当前只验证了 115200 baud".into());
@@ -74,6 +86,7 @@ pub fn connect_device(
                 .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
+            gamebox.disconnect(None)?;
             state.connect_serial(
                 app,
                 port_name,
@@ -88,10 +101,48 @@ pub fn connect_device(
 #[tauri::command]
 pub fn disconnect_device(
     state: State<'_, AppState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
     expected_session_id: Option<u64>,
 ) -> Result<ConnectionSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
     state.disconnect(expected_session_id)?;
     state.snapshot()
+}
+
+#[tauri::command]
+pub fn gamebox_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    gamebox: State<'_, GameBoxState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
+    port_name: String,
+) -> Result<GameBoxSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    let port_name = port_name.trim();
+    if port_name.is_empty() {
+        return Err("请选择游戏机串口".into());
+    }
+    ensure_serial_port_available(port_name)?;
+    // Preserve the existing robot safety shutdown when switching products.
+    // Its writes target only its previously owned WL1 port, never GameBox.
+    state.disconnect(None)?;
+    gamebox.connect(app, port_name)
+}
+
+#[tauri::command]
+pub fn gamebox_disconnect(
+    gamebox: State<'_, GameBoxState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
+    expected_session_id: Option<u64>,
+) -> Result<GameBoxSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    gamebox.disconnect(expected_session_id)?;
+    gamebox.snapshot()
+}
+
+#[tauri::command]
+pub fn gamebox_snapshot(gamebox: State<'_, GameBoxState>) -> Result<GameBoxSnapshot, String> {
+    gamebox.snapshot()
 }
 
 #[tauri::command]

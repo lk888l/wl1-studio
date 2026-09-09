@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | **English**
 
-This repository implements an extensible, multi-product desktop control application. The application opens on a product home page and then enters the connection, telemetry, tuning, and diagnostics workspace for the selected product. The first and currently only product with a completed device-protocol integration is the **WL1 wheel-legged robot**. The pocket-piano workspace remains an interaction preview; production builds disable its entry by default so it cannot be mistaken for real hardware support. The project uses Tauri + React with least-privilege capabilities, a replaceable transport layer, and an auditable release workflow.
+This repository implements an extensible, multi-product desktop control application. The product home opens independent workspaces for the **WL1 wheel-legged robot** (connection, telemetry, and tuning) and **GameBox** (read-only serial diagnostics, button visualization, game/tool reference, and local firmware checks). GameBox still requires real-device serial validation; its current firmware has no receive commands or serial updater. The pocket-piano workspace remains an interaction preview, disabled in production by default. The project uses Tauri + React with least-privilege capabilities, a replaceable transport layer, and an auditable release workflow. Builds do not depend on a separate firmware repository.
 
 > [!WARNING]
 > A wheel-legged robot can move suddenly because of incorrect parameters, protocol misidentification, or communication faults. Before the first connection and every tuning session, read the [Safety Guide](docs/safety.md), lift the drive wheels off the ground, prepare a physical emergency stop, and keep people outside the motion area. This software is not a safety controller and cannot replace firmware-side limits, watchdogs, or emergency-stop circuitry.
@@ -11,11 +11,12 @@ This repository implements an extensible, multi-product desktop control applicat
 
 The WL1 workspace now offers **Direct robot** and **Tune through remote** serial targets. Remote tuning forwards PID and attitude-bias commands through NRF24L01 and requires the companion serial-bridge firmware; the original remote firmware does not start UART RX. It has no robot telemetry or parameter-execution acknowledgements, and physical joysticks retain motion and height control. See the [remote tuning guide](docs/remote-tuning.md). The Legacy telemetry and idle-framing details below apply to direct robot connections.
 
-The codebase now has a cross-platform “product home + isolated workspace + Rust device gateway” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. Future products should provide their own protocol, Transport, pages, and safety policy; a workspace without a backend and real-hardware validation must remain a preview.
+The codebase now has a cross-platform “product home + isolated workspace + Rust device gateway” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. GameBox independently receives the `FW2` button-event protocol. Future products should provide their own protocol, Transport, pages, and safety policy, with real interfaces, hardware-free demos, and outstanding device validation clearly identified.
 
 The first release covers these core scenarios:
 
-- clear any stale device session when the product home starts, then select the WL1 wheel-legged robot; return to the catalog only after the current session has ended safely;
+- clear any stale device session when the product home starts, then select WL1 or GameBox; return to the catalog only after the current session has ended;
+- inspect GameBox button events over read-only serial, browse six games and six tools, and check local `.bin` size, vectors, and CRC-32;
 - connect to a serial device and display connection state, a static Legacy compatibility description, and separate IMU/RPM telemetry freshness;
 - observe IMU and left/right wheel RPM through `showimu -y/-n` and `showrpm -y/-n`;
 - tune four PID groups and `legheight`, and send a combined motion target through `R <turn> <velocity> <roll> <height>`;
@@ -44,6 +45,12 @@ See the [Firmware Integration Guide](docs/firmware-integration.md) for the compl
 WL1 opens on one motion workbench with body pitch bias, leg height, all four PID groups, direction controls, and telemetry. The inline connection bar remembers the last serial port and selects a sole available port without connecting automatically. Numeric editors and sliders share parameter drafts; connecting preserves those drafts, while motion requires an explicitly chosen height and activation. Profiles and local geometry settings are available in an expandable section.
 
 VOFA ranges and slider steps are applied consistently in the UI and TypeScript/Rust validators. See the [range and firmware reference notes](docs/motion-parameter-ranges.md) for source details and version differences.
+
+## GameBox workspace
+
+GameBox receives eight-button diagnostics at **115200 baud / 8N1**, with event visualization and logs. It sends no serial probes, controls, or firmware bytes. The game/tool catalog describes applications running on the device; desktop and browser demos use explicitly labeled synthetic events.
+
+Local `.bin` checks cover size, Cortex-M vectors, and CRC-32 against the current **62 KiB application + 2 KiB settings** layout. They do not authenticate firmware or permit flashing. Updates currently use SWD. Versioned serial capabilities, external SPI Flash package storage, resumable transfer, and a recovery bootloader remain plans. Ordinary SPI NOR cannot extend the F103's directly executable firmware capacity, and a bootloader further reduces internal application space. See the [GameBox integration guide](docs/gamebox-integration.md) for the audited source baseline and pending hardware checks.
 
 ## Technology
 
@@ -78,7 +85,7 @@ npm run check
 npm run tauri dev
 ```
 
-For frontend-only work, run `npm run dev` and use the WL1 Mock. Build Linux packages with:
+For frontend-only work, run `npm run dev` and use the WL1 Mock or GameBox demo. Real serial connections require the Tauri desktop runtime. Build Linux packages with:
 
 ```bash
 npm run bundle:linux
@@ -97,6 +104,7 @@ deb and AppImage artifacts are written below `src-tauri/target/release/bundle/`.
 ├── docs/
 │   ├── architecture.md            # Layers, state, and version strategy
 │   ├── firmware-integration.md    # WL1 firmware and transport integration contract
+│   ├── gamebox-integration.md     # GameBox serial diagnostics and storage roadmap
 │   ├── linux.md                   # Ubuntu development, runtime, and packaging
 │   ├── release.md                 # Cross-platform release and signing gates
 │   ├── security-audit.md          # Security findings and residual risks
@@ -123,6 +131,7 @@ The supporting guides are currently written in Simplified Chinese:
 
 - [System architecture](docs/architecture.md)
 - [Firmware integration](docs/firmware-integration.md)
+- [GameBox integration](docs/gamebox-integration.md)
 - [Ubuntu 24.04 guide](docs/linux.md)
 - [Development guide](docs/development.md)
 - [Release guide](docs/release.md)

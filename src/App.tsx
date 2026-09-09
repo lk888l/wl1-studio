@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Clock3,
   Gauge,
+  Gamepad2,
   Music2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +17,7 @@ import { KinematicsPage } from "./components/pages/KinematicsPage";
 import { OverviewPage } from "./components/pages/OverviewPage";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
+import { GameBoxStudio } from "./components/gamebox/GameBoxStudio";
 import { LiveChart } from "./components/LiveChart";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ProductHome } from "./components/ProductHome";
@@ -26,6 +28,7 @@ import {
   parameterDefinitions,
 } from "./data/parameters";
 import { deviceGateway, motionCommand } from "./lib/device";
+import { gameboxGateway } from "./lib/gamebox";
 import { isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
 import { appendTelemetrySample, telemetryChannelFresh } from "./lib/telemetry";
 import {
@@ -122,7 +125,7 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
   return next;
 }
 
-type AppView = "products" | "wl1" | "piano";
+type AppView = "products" | "wl1" | "piano" | "gamebox";
 type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
@@ -160,6 +163,7 @@ export default function App() {
     setCatalogSafety("checking");
     setCatalogSafetyError(null);
     void deviceGateway.initialize()
+      .then(() => gameboxGateway.initialize())
       .then(() => {
         if (!cancelled) setCatalogSafety("ready");
       })
@@ -179,7 +183,9 @@ export default function App() {
       ? "设备控制中心 · 选择产品"
       : view === "wl1"
         ? "WL1 Studio · 轮腿控制中心"
-        : "KeyNest Studio · 口袋电子琴";
+        : view === "gamebox"
+          ? "GameBox Studio · 游戏机工作台"
+          : "KeyNest Studio · 口袋电子琴";
   }, [view]);
 
   useEffect(() => {
@@ -212,7 +218,8 @@ export default function App() {
     setProductTransition("covering");
   }, [catalogSafety, personalization.reducedMotion, productTransition]);
 
-  const launchLabel = launchTarget === "piano" ? "KeyNest Studio" : "WL1 Studio";
+  const launchLabel = launchTarget === "piano" ? "KeyNest Studio"
+    : launchTarget === "gamebox" ? "GameBox Studio" : "WL1 Studio";
 
   return (
     <div
@@ -233,9 +240,12 @@ export default function App() {
           onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
           onOpenWl1={() => openProduct("wl1")}
           onOpenPiano={() => openProduct("piano")}
+          onOpenGameBox={() => openProduct("gamebox")}
         />
       ) : view === "wl1" ? (
         <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
+      ) : view === "gamebox" ? (
+        <GameBoxStudio onBack={() => setView("products")} />
       ) : (
         <PianoStudio onBack={() => setView("products")} />
       )}
@@ -249,7 +259,9 @@ export default function App() {
           <span className="product-transition__wash" />
           <span className="product-transition__content">
             <span className="product-transition__mark" aria-hidden="true">
-              {launchTarget === "piano" ? <Music2 size={29} strokeWidth={2.2} /> : <Gauge size={29} strokeWidth={2.2} />}
+              {launchTarget === "piano" ? <Music2 size={29} strokeWidth={2.2} />
+                : launchTarget === "gamebox" ? <Gamepad2 size={29} strokeWidth={2.2} />
+                  : <Gauge size={29} strokeWidth={2.2} />}
               <i />
             </span>
             <span><small>正在打开</small><strong>{launchLabel}</strong></span>
