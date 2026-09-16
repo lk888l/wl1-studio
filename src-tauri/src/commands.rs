@@ -1,11 +1,20 @@
+use std::time::Duration;
+
 use tauri::{AppHandle, State};
 
 use crate::gamebox::{GameBoxSnapshot, GameBoxState};
+use crate::mifare::CardDump;
+use crate::nfc::{NfcSnapshot, NfcState, ReadOptions, WriteOptions, WriteReport};
 use crate::state::AppState;
 use crate::types::{
     ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget, DeviceCapabilities,
     MotionTargetRequest, SerialConfig, SerialPortOption,
 };
+
+/// Upper bound for a whole-card operation. A full read of a 4K card whose keys
+/// are all unknown sweeps the dictionary for every sector, which is slow but
+/// cancellable; this only exists so a wedged port cannot hang a command forever.
+const NFC_OPERATION_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Serializes product switches across both independently owned backends.
 /// Order: product lifecycle -> one product's lifecycle -> its session state.
@@ -143,6 +152,80 @@ pub fn gamebox_disconnect(
 #[tauri::command]
 pub fn gamebox_snapshot(gamebox: State<'_, GameBoxState>) -> Result<GameBoxSnapshot, String> {
     gamebox.snapshot()
+}
+
+#[tauri::command]
+pub fn nfc_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    nfc: State<'_, NfcState>,
+    gamebox: State<'_, GameBoxState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
+    port_name: String,
+) -> Result<NfcSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    let port_name = port_name.trim();
+    if port_name.is_empty() {
+        return Err("请选择读卡器串口".into());
+    }
+    ensure_serial_port_available(port_name)?;
+    // Only one product may own a serial port at a time. Each backend closes
+    // only the port it previously owned, so switching never writes to the
+    // device being abandoned.
+    state.disconnect(None)?;
+    gamebox.disconnect(None)?;
+    nfc.connect(app, port_name)
+}
+
+#[tauri::command]
+pub fn nfc_disconnect(
+    nfc: State<'_, NfcState>,
+    lifecycle: State<'_, ProductSessionLifecycle>,
+    expected_session_id: Option<u64>,
+) -> Result<NfcSnapshot, String> {
+    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    nfc.disconnect(expected_session_id)?;
+    nfc.snapshot()
+}
+
+#[tauri::command]
+pub fn nfc_snapshot(nfc: State<'_, NfcState>) -> Result<NfcSnapshot, String> {
+    nfc.snapshot()
+}
+
+#[tauri::command]
+pub fn nfc_cancel(nfc: State<'_, NfcState>) -> Result<(), String> {
+    nfc.cancel()
+}
+
+#[tauri::command]
+pub async fn nfc_read_card(
+    app: AppHandle,
+    nfc: State<'_, NfcState>,
+    options: ReadOptions,
+) -> Result<CardDump, String> {
+    // State borrows the app; the session is cheap to clone because every field
+    // behind it is reference counted, so the blocking work can move off the
+    // async runtime without holding a borrow across the await.
+    let nfc = nfc.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || nfc.read(app, options, NFC_OPERATION_TIMEOUT))
+        .await
+        .map_err(|error| format!("NFC 读取任务中断: {error}"))?
+}
+
+#[tauri::command]
+pub async fn nfc_write_card(
+    app: AppHandle,
+    nfc: State<'_, NfcState>,
+    dump: CardDump,
+    options: WriteOptions,
+) -> Result<WriteReport, String> {
+    let nfc = nfc.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        nfc.write(app, dump, options, NFC_OPERATION_TIMEOUT)
+    })
+    .await
+    .map_err(|error| format!("NFC 写入任务中断: {error}"))?
 }
 
 #[tauri::command]

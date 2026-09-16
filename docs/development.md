@@ -176,7 +176,7 @@ CI 会在 Ubuntu/Windows 执行质量检查，并在 Ubuntu 构建 deb/AppImage 
 
 ### Tauri 可以编译但窗口空白
 
-先运行 `npm run build` 检查前端错误，再核对 Tauri 的 `frontendDist`、`devUrl` 和 Vite 端口是否分别指向 `../dist`、`http://localhost:1420`。
+先运行 `npm run build` 检查前端错误，再核对 Tauri 的 `frontendDist`、`devUrl` 和 Vite 端口是否分别指向 `../dist`、`http://localhost:6173`。
 
 ### 端口无法打开
 

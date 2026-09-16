@@ -4,10 +4,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Boxes,
+  Copy,
+  CreditCard,
   Cpu,
   Gauge,
   Gamepad2,
   Cable,
+  KeyRound,
   FileCode2,
   Keyboard,
   Music2,
@@ -26,7 +29,7 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | "gamebox" | null;
+  launching: "wl1" | "piano" | "gamebox" | "nfc" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
@@ -34,6 +37,7 @@ interface ProductHomeProps {
   onOpenWl1: () => void;
   onOpenPiano: () => void;
   onOpenGameBox: () => void;
+  onOpenNfc: () => void;
 }
 
 export function ProductHome({
@@ -48,6 +52,7 @@ export function ProductHome({
   onOpenWl1,
   onOpenPiano,
   onOpenGameBox,
+  onOpenNfc,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -121,7 +126,7 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>2 个设备工作台 · 1 个交互预览</span>
+            <span>3 个设备工作台 · 1 个交互预览</span>
           </div>
 
           <div className="product-catalog__layout">
@@ -171,6 +176,104 @@ export function ProductHome({
                     : safetyState === "checking" ? "正在准备设备会话…"
                       : safetyState === "error" ? "等待安全检查通过" : "进入 GameBox 工作台"}</strong>
                   <ArrowRight size={21} />
+                </span>
+              </span>
+            </button>
+            <button
+              className={`product-card product-card--nfc glass-card liquid-card is-${safetyState}${launching === "nfc" ? " is-launching" : ""}`}
+              type="button"
+              disabled={safetyState !== "ready" || Boolean(launching)}
+              aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
+              title={safetyState === "ready" ? "进入 PN532 读卡工作台" : "等待启动安全检查通过"}
+              onClick={onOpenNfc}
+            >
+              <span className="product-card__visual" aria-hidden="true">
+                <span className="product-card__model">PN532</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="hubNfcCard" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stopColor="#fdfdff" />
+                      <stop offset="0.55" stopColor="#dde5fb" />
+                      <stop offset="1" stopColor="#b3c2ee" />
+                    </linearGradient>
+                    <linearGradient id="hubNfcBoard" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0" stopColor="#2f51c4" />
+                      <stop offset="1" stopColor="#1d3487" />
+                    </linearGradient>
+                    <filter id="hubNfcShadow" x="-40%" y="-40%" width="180%" height="190%">
+                      <feDropShadow dx="0" dy="16" stdDeviation="14" floodColor="#2b3f88" floodOpacity=".24" />
+                    </filter>
+                  </defs>
+                  <ellipse cx="260" cy="264" rx="172" ry="19" fill="#5f7ac2" opacity=".16" />
+                  <g filter="url(#hubNfcShadow)">
+                    <rect x="163" y="43" width="196" height="219" rx="24" fill="url(#hubNfcBoard)" stroke="#fff" strokeWidth="4" />
+                    <rect x="188" y="70" width="146" height="76" rx="11" fill="#eef2ff" opacity=".92" />
+                    <g fill="none" stroke="#2f51c4" strokeWidth="4" strokeLinecap="round">
+                      <path d="M243 108a22 22 0 0 1 0-24" />
+                      <path d="M252 118a36 36 0 0 1 0-44" />
+                      <path d="M233 98a9 9 0 0 1 0-8" />
+                    </g>
+                    <circle cx="267" cy="94" r="5" fill="#2f51c4" />
+                    <rect x="203" y="206" width="34" height="22" rx="5" fill="#16235c" />
+                    <g fill="#8ea2e8">
+                      <rect x="209" y="212" width="4" height="10" />
+                      <rect x="217" y="212" width="4" height="10" />
+                      <rect x="225" y="212" width="4" height="10" />
+                    </g>
+                    <g fill="#f4c96b">
+                      {Array.from({ length: 6 }, (_, index) => (
+                        <rect key={index} x={256 + (index % 2) * 15} y={206 + Math.floor(index / 2) * 9} width="10" height="6" rx="1.5" />
+                      ))}
+                    </g>
+                    <g fill="#a9b8ee">
+                      {Array.from({ length: 8 }, (_, index) => (
+                        <rect key={index} x="172" y={82 + index * 17} width="11" height="6" rx="2" />
+                      ))}
+                    </g>
+                    <g fill="#a9b8ee">
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <rect key={index} x="188" y="243" width="11" height="6" rx="2" />
+                      ))}
+                    </g>
+                    <path d="M300 178h44v13h-44z" fill="#16235c" />
+                    <path d="M300 199h44v13h-44z" fill="#16235c" />
+                  </g>
+                  <g transform="translate(358 92) rotate(14)" filter="url(#hubNfcShadow)">
+                    <rect x="0" y="0" width="126" height="80" rx="12" fill="url(#hubNfcCard)" stroke="#fff" strokeWidth="3.5" />
+                    <rect x="14" y="17" width="30" height="23" rx="4" fill="#e3b75c" />
+                    <path d="M14 28h30M29 17v23" stroke="#b98f35" strokeWidth="1.6" />
+                    <rect x="58" y="52" width="52" height="6" rx="3" fill="#93a6dc" />
+                    <rect x="58" y="63" width="34" height="5" rx="2.5" fill="#b2c0e8" />
+                  </g>
+                </svg>
+              </span>
+
+              <span className="product-card__body">
+                <span className="product-card__meta">
+                  <span className="product-available"><i />串口接入</span>
+                </span>
+                <span className="product-card__title">
+                  <strong>PN532 读卡器</strong>
+                </span>
+                <span className="product-card__description">读取 MIFARE 门卡全部扇区，备份后可复制写入新卡。</span>
+                <span className="product-card__features">
+                  <span><CreditCard size={15} />整卡读取</span>
+                  <span><KeyRound size={15} />密钥字典</span>
+                  <span><Copy size={15} />复制写入</span>
+                </span>
+                <span className="product-card__action">
+                  <span>
+                    <strong>
+                      {launching === "nfc"
+                        ? "正在打开工作台…"
+                        : safetyState === "checking"
+                          ? "正在准备设备会话…"
+                          : safetyState === "error"
+                            ? "等待安全检查通过"
+                            : "进入 NFC 工作台"}
+                    </strong>
+                  </span>
+                  {safetyState === "ready" ? <ArrowRight size={21} /> : <ShieldCheck size={20} />}
                 </span>
               </span>
             </button>
