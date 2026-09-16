@@ -948,6 +948,9 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 .product-section-heading h2 { font-size: 20px; letter-spacing: -.025em; }
 .product-section-heading > span { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
 .product-catalog__layout { display: grid; gap: 20px; }
+.product-card--nfc { --accent: #3f5ed4; --accent-deep: #2c44a4; }
+.product-card--nfc .product-card__visual { background: radial-gradient(circle at 50% 40%, #ffffffb3, transparent 14rem), linear-gradient(145deg, #e2e8fb, #dfe3f5); }
+.product-card--nfc .product-card__model { color: #3a55bd; }
 .product-card--gamebox { --accent: #328269; --accent-deep: #21614e; }
 .product-card--gamebox .product-card__visual { background: radial-gradient(circle at 50% 40%, #ffffffb3, transparent 14rem), linear-gradient(145deg, #dce8d5, #d8ede5); }
 .product-card--gamebox .product-card__model { color: #36735e; }

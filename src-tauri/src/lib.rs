@@ -2,6 +2,9 @@
 
 mod commands;
 mod gamebox;
+mod mifare;
+mod nfc;
+mod pn532;
 mod protocol;
 mod state;
 mod transport;
@@ -39,6 +42,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state::AppState::default())
         .manage(gamebox::GameBoxState::default())
+        .manage(nfc::NfcState::default())
         .manage(commands::ProductSessionLifecycle::default())
         .invoke_handler(tauri::generate_handler![
             commands::list_serial_ports,
@@ -52,6 +56,12 @@ pub fn run() {
             commands::gamebox_connect,
             commands::gamebox_disconnect,
             commands::gamebox_snapshot,
+            commands::nfc_connect,
+            commands::nfc_disconnect,
+            commands::nfc_snapshot,
+            commands::nfc_cancel,
+            commands::nfc_read_card,
+            commands::nfc_write_card,
         ])
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
@@ -62,6 +72,7 @@ pub fn run() {
             ) {
                 let state = app.state::<state::AppState>();
                 let gamebox = app.state::<gamebox::GameBoxState>();
+                let nfc = app.state::<nfc::NfcState>();
                 let lifecycle = app.state::<commands::ProductSessionLifecycle>();
                 let _lifecycle = lifecycle
                     .0
@@ -69,6 +80,7 @@ pub fn run() {
                     .unwrap_or_else(|error| error.into_inner());
                 let _ = state.disconnect(None);
                 let _ = gamebox.disconnect(None);
+                let _ = nfc.disconnect(None);
             }
         });
 }
