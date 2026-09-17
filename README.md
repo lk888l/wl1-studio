@@ -131,6 +131,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 - [系统架构](docs/architecture.md)
 - [固件接入](docs/firmware-integration.md)
 - [GameBox 游戏机接入](docs/gamebox-integration.md)
+- [PN532 NFC 门卡备份与写入](docs/nfc-pn532.md)
 - [Ubuntu 24.04 指南](docs/linux.md)
 - [开发指南](docs/development.md)
 - [发布规范](docs/release.md)

@@ -6,10 +6,8 @@
 //! decoding below come from the MF1S50/MF1S70 memory organisation rather than
 //! from the PN532 documentation.
 //!
-//! Nothing here performs I/O. Key *acceptance* is deliberately left to the
-//! reader: a candidate key harvested out of a trailer is only recorded once the
-//! card has actually authenticated with it, because access-bit decoding is easy
-//! to get subtly wrong and the card is the authority.
+//! Nothing here performs I/O. Hidden keys require successful authentication;
+//! readable Key B bytes are data and cannot be used for authentication.
 
 use serde::{Deserialize, Serialize};
 
@@ -84,9 +82,8 @@ impl Sector {
         self.first_block..self.first_block + u16::from(self.block_count)
     }
 
-    /// Rule that decides whether a sector trailer's Key B is genuinely
-    /// protected. Used for reporting only; the reader still verifies keys by
-    /// authenticating.
+    /// All blocks except the sector trailer, including the manufacturer block
+    /// in sector zero; write callers decide whether to include that block.
     pub fn data_blocks(self) -> std::ops::Range<u16> {
         self.first_block..self.trailer_block()
     }
@@ -121,11 +118,6 @@ pub fn sector_map(kind: CardKind) -> Vec<Sector> {
         _ => Vec::new(),
     }
 }
-
-/// Highest page index worth probing on an Ultralight/NTAG card. The reader
-/// walks upward and stops at the first NAK, so this only bounds a pathological
-/// card that answers forever.
-pub const MAX_ULTRALIGHT_PAGE: u8 = 231;
 
 /// Keys from published vendor defaults and the two reference open-source
 /// readers (`libnfc`/`mfoc` and MIFARE Classic Tool). This is a dictionary, not
@@ -202,6 +194,9 @@ pub fn parse_key(text: &str) -> Result<[u8; KEY_BYTES], String> {
             cleaned.len()
         ));
     }
+    if !cleaned.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("密钥只能包含十六进制字符 0-9 A-F".into());
+    }
     let mut key = [0_u8; KEY_BYTES];
     for (index, slot) in key.iter_mut().enumerate() {
         *slot = u8::from_str_radix(&cleaned[index * 2..index * 2 + 2], 16)
@@ -212,13 +207,7 @@ pub fn parse_key(text: &str) -> Result<[u8; KEY_BYTES], String> {
 
 /// The three access-bit nibbles of a sector trailer.
 ///
-/// These are the raw decoded bit triplets, exposed for expert inspection. This
-/// module deliberately does **not** translate them into a permissions summary:
-/// the mapping from triplet to "who may read or write" is a lookup table out of
-/// the MF1S50 datasheet that cannot be checked without a card in hand, and a
-/// wrong summary would mislead an operator about how protected their card is.
-/// What the app acts on instead is empirical — it authenticates with a key and
-/// believes the card's answer.
+/// Decoded per MF1S50YYX_V1 §8.7, including all three redundancy pairs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AccessBits {
     pub c1: [u8; 4],
@@ -227,6 +216,11 @@ pub struct AccessBits {
 }
 
 impl AccessBits {
+    /// Table 7: readable Key B is data, not an authentication key.
+    pub fn key_b_readable(self) -> bool {
+        matches!(self.block(3), (0, 0, 0) | (0, 1, 0) | (0, 0, 1))
+    }
+
     pub fn block(self, block: usize) -> (u8, u8, u8) {
         (self.c1[block], self.c2[block], self.c3[block])
     }
@@ -257,7 +251,10 @@ pub fn decode_access_bits(trailer: &[u8]) -> Option<AccessBits> {
     // Nibble A: byte 7 high, complemented in byte 6 low.
     // Nibble B: byte 6 high, inverted.
     // Nibble C: byte 8 high, complemented in byte 7 low.
-    if (b7 >> 4) != ((b6 & 0x0F) ^ 0x0F) || (b8 >> 4) != ((b7 & 0x0F) ^ 0x0F) {
+    if (b7 >> 4) != ((b6 & 0x0F) ^ 0x0F)
+        || (b8 >> 4) != ((b7 & 0x0F) ^ 0x0F)
+        || (b8 & 0x0F) != ((b6 >> 4) ^ 0x0F)
+    {
         return None;
     }
 
@@ -351,6 +348,9 @@ pub fn manufacturer_bcc_is_valid(block: &[u8]) -> Option<bool> {
 }
 
 pub fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
+    if !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("包含非十六进制字符".into());
+    }
     if !text.len().is_multiple_of(2) {
         return Err("十六进制字符串长度必须为偶数".into());
     }

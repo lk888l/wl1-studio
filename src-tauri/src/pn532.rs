@@ -188,7 +188,7 @@ impl FrameParser {
             }
             let body = self.buffer[4..4 + len].to_vec();
             let dcs = self.buffer[4 + len];
-            if dcs != data_checksum(&body) {
+            if dcs != data_checksum(&body) || self.buffer[total - 1] != 0 {
                 self.buffer.drain(..1);
                 continue;
             }
@@ -268,7 +268,7 @@ pub struct PassiveTarget {
 
 pub fn parse_firmware_version(data: &[u8]) -> Result<FirmwareVersion, String> {
     // `data` begins with the response code, already checked by the caller.
-    if data.len() < 5 {
+    if data.first() != Some(&0x03) || data.len() != 5 {
         return Err(format!(
             "PN532 固件版本响应长度异常：期望 5 字节，实际 {} 字节",
             data.len()
@@ -286,6 +286,9 @@ pub fn parse_firmware_version(data: &[u8]) -> Result<FirmwareVersion, String> {
 /// response code, so the target count is at offset 1. A count of zero is a
 /// normal "no card in the field" result, not an error.
 pub fn parse_list_passive_target(data: &[u8]) -> Result<Vec<PassiveTarget>, String> {
+    if data.first() != Some(&0x4B) {
+        return Err("PN532 寻卡响应命令不匹配".into());
+    }
     let Some(&count) = data.get(1) else {
         return Err("PN532 寻卡响应缺少目标数量字段".into());
     };
@@ -326,6 +329,9 @@ pub fn parse_list_passive_target(data: &[u8]) -> Result<Vec<PassiveTarget>, Stri
 /// Splits an `D5 41 ...` payload into status and data. A non-zero status
 /// carries no data field at all, so callers must not read past it.
 pub fn parse_data_exchange(data: &[u8]) -> Result<(u8, Vec<u8>), String> {
+    if data.first() != Some(&0x41) {
+        return Err("PN532 数据交换响应命令不匹配".into());
+    }
     let Some(&status) = data.get(1) else {
         return Err("PN532 数据交换响应缺少状态字节".into());
     };

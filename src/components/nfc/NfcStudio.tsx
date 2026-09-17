@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowLeftRight,
   BadgeCheck,
   BookOpen,
   Cable,
@@ -16,12 +17,16 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { isTauriRuntime } from "../../lib/device";
 import {
   defaultWriteOptions,
   dumpGaps,
+  missingKeySectors,
+  parseCardDump,
+  readSummary,
+  downloadCardDump,
   emptyReadOptions,
   formatUid,
   hexPairs,
@@ -34,15 +39,18 @@ import {
   type WriteOptions,
   type WriteReport,
 } from "../../lib/nfc";
+import { comparisonReducer, emptyComparisonWorkspace } from "../../lib/nfc-comparison";
+import { NfcComparePage } from "./NfcComparePage";
 import type { SerialPortOption } from "../../types";
 import "./NfcStudio.css";
 
-type NfcPage = "read" | "write" | "data" | "help";
+type NfcPage = "read" | "write" | "data" | "compare" | "help";
 
 const pages = [
   { id: "read", label: "读取卡片", icon: CreditCard, caption: "读出整张卡的全部扇区与密钥。" },
   { id: "write", label: "复制写入", icon: Upload, caption: "把备份写进一张新卡。" },
   { id: "data", label: "数据视图", icon: Database, caption: "逐块查看十六进制与可读字符。" },
+  { id: "compare", label: "回读对比", icon: ArrowLeftRight, caption: "加入读卡记录或 JSON 备份，比较两张卡的数据与密钥。" },
   { id: "help", label: "接线与说明", icon: BookOpen, caption: "模块跳线、接线与安全提示。" },
 ] as const;
 
@@ -67,6 +75,8 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [dump, setDump] = useState<CardDump | null>(nfcGateway.lastDump);
+  const [dumpSource, setDumpSource] = useState("当前备份");
+  const [comparison, dispatchComparison] = useReducer(comparisonReducer, undefined, emptyComparisonWorkspace);
   const [report, setReport] = useState<WriteReport | null>(nfcGateway.lastReport);
 
   const [extraKeysText, setExtraKeysText] = useState("");
@@ -168,21 +178,15 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
       .split(/[\s,;]+/)
       .map((entry) => entry.trim())
       .filter(Boolean);
-    options.sectorKeys = Object.entries(sectorKeyDrafts)
-      .filter(([, value]) => value.trim().length > 0)
-      .map(([sector, value]) => {
-        const trimmed = value.trim();
-        const keyB = /^b:/i.test(trimmed);
-        return {
-          sector: Number(sector),
-          key: keyB ? trimmed.slice(2).trim() : trimmed.replace(/^a:/i, "").trim(),
-          keyB,
-        };
-      });
+    options.sectorKeys = Object.entries(sectorKeyDrafts).flatMap(([sector, value]) =>
+      value.split(/[,;]+/).map((entry) => entry.trim()).filter(Boolean).map((entry) => ({
+        sector: Number(sector), key: entry.replace(/^[ab]:/i, "").trim(), keyB: /^b:/i.test(entry),
+      })),
+    );
     return options;
   }, [extraKeysText, sectorKeyDrafts]);
 
-  const readCard = useCallback(async (): Promise<void> => {
+  const readCard = useCallback(async (destination: NfcPage = "data"): Promise<void> => {
     const token = ++operation.current;
     setBusy(true);
     setError(null);
@@ -193,12 +197,9 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
       const next = await nfcGateway.readCard(buildReadOptions());
       if (operation.current !== token) return;
       setDump(next);
-      setPage("data");
-      setNotice(
-        next.unresolvedSectors > 0
-          ? `已读取 ${next.label}，但有 ${next.unresolvedSectors} 个扇区未能认证。可在下方为这些扇区手动填写密钥后重试。`
-          : `已完整读取 ${next.label}，UID ${formatUid(next.uid)}。`,
-      );
+      setDumpSource("读卡结果");
+      setPage(destination);
+      setNotice(readSummary(next));
     } catch (reason) {
       if (operation.current !== token) return;
       setError(errorText(reason));
@@ -217,6 +218,8 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
 
   const writeCard = useCallback(async (): Promise<void> => {
     if (!dump) return;
+    setReport(null);
+    nfcGateway.setReport(null);
     const token = ++operation.current;
     setBusy(true);
     setError(null);
@@ -234,7 +237,9 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
       setReport(next);
       // A deliberately skipped block is not a failure. Reporting both the same
       // way made a 62-of-63 copy read like a broken write.
-      if (next.blocksFailed > 0) {
+      if (options.verify && !next.verified) {
+        setNotice(`写入结束，但校验未全部通过：${next.blocksVerified}/${next.blocksWritten} 个已写块通过校验。请查看明细。`);
+      } else if (next.blocksFailed > 0) {
         setNotice(
           `写入结束：成功 ${next.blocksWritten} 个块，失败 ${next.blocksFailed} 个块。请查看下方明细。`,
         );
@@ -269,12 +274,13 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
   const importDump = useCallback((): void => {
     setError(null);
     try {
-      const parsed = JSON.parse(importText) as CardDump;
-      if (!parsed || !Array.isArray(parsed.units) || typeof parsed.uid !== "string") {
-        throw new Error("JSON 结构不是本工具导出的备份");
-      }
+      const parsed = parseCardDump(importText);
+      setReport(null);
+      nfcGateway.setReport(null);
+      setUidConfirmed(false);
       nfcGateway.setDump(parsed);
       setDump(parsed);
+      setDumpSource("导入的备份");
       setShowImport(false);
       setImportText("");
       setNotice(`已导入备份：${parsed.label} · UID ${formatUid(parsed.uid)}`);
@@ -297,7 +303,7 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
   }, [busy, connected, onBack]);
 
   const unresolvedSectors = useMemo(
-    () => (dump ? dump.sectors.filter((sector) => !sector.resolved) : []),
+    () => (dump ? dump.sectors.filter((sector) => !sector.resolved || !sector.keyA || !sector.keyB || dump.units.some((unit) => unit.sector === sector.index && !unit.data)) : []),
     [dump],
   );
   const gaps = dump ? dumpGaps(dump) : 0;
@@ -511,7 +517,13 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
             />
           )}
 
-          {page === "data" && <DataPage dump={dump} onCopy={copyDump} />}
+          {page === "data" && <DataPage dump={dump} onCopy={copyDump} onCompare={() => setPage("compare")} />}
+
+          {page === "compare" && (
+            <NfcComparePage dump={dump} dumpSource={dumpSource} connected={connected} busy={busy}
+              workspace={comparison} dispatch={dispatchComparison}
+              onRead={() => void readCard("compare")} onReadSettings={() => setPage("read")} />
+          )}
 
           {page === "help" && <HelpPage />}
         </main>
@@ -557,8 +569,8 @@ function ReadPage({
           </button>
         </div>
         <p className="nfc-hint">
-          读卡器会先寻卡，再逐扇区用默认密钥字典认证并读出所有块。门禁卡绝大多数使用出厂密钥，
-          通常几秒内完成；遇到非默认密钥时该扇区会被标记出来，可在下方补充密钥后重试。
+          读卡器会寻卡，再逐扇区尝试已提供的密钥与默认密钥，同时获取 Key A / Key B 和可读块。
+          未知密钥与不可读块会单独标记；补充正确密钥后可重试。读取过程中请保持卡片位置稳定。
         </p>
 
         <div className="nfc-field">
@@ -619,12 +631,12 @@ function ReadPage({
         <section className="nfc-card">
           <div className="nfc-card__heading">
             <h2>
-              <KeyRound size={16} /> 未能认证的扇区
+              <KeyRound size={16} /> 待补齐数据或密钥的扇区
             </h2>
           </div>
           <p className="nfc-hint">
-            这些扇区使用了内置字典之外的密钥。填入密钥后重新读取即可补齐；前缀 <code>b:</code> 表示
-            按 Key B 认证，默认按 Key A。
+            这些扇区仍有缺失块或未知密钥。可填入 <code>a:密钥,b:密钥</code> 同时提供两种密钥，
+            不写前缀时按 Key A。已读出数据不代表已取得所有密钥。
           </p>
           <ul className="nfc-key-list">
             {unresolved.map((sector) => (
@@ -632,7 +644,7 @@ function ReadPage({
                 <span className="nfc-key-list__sector">扇区 {sector.index}</span>
                 <input
                   type="text"
-                  placeholder="6 字节密钥，例如 b:FFFFFFFFFFFF"
+                  placeholder="a:FFFFFFFFFFFF,b:A0A1A2A3A4A5"
                   value={sectorKeyDrafts[sector.index] ?? ""}
                   onChange={(event) => onSectorKeyChange(sector.index, event.target.value)}
                 />
@@ -740,6 +752,12 @@ function WritePage({
                 </dd>
               </div>
             </dl>
+            {missingKeySectors(dump).length > 0 && (
+              <p className="nfc-warning-line"><ShieldAlert size={14} />
+                {missingKeySectors(dump).length} 个扇区尚缺密钥，无法完整重建尾块。请回到读取页补齐。
+              </p>
+            )}
+            <p className="nfc-hint">小米钱包空白门卡：先选中该门卡并保持手机 NFC 区贴近天线。手机卡的 UID 与密钥权限由手机控制，数据写入成功不等于门禁可用。</p>
             {gaps > 0 && (
               <p className="nfc-warning-line">
                 <ShieldAlert size={14} />
@@ -763,6 +781,12 @@ function WritePage({
 
             <fieldset className="nfc-options">
               <legend>写入选项</legend>
+              <label className="nfc-toggle">
+                <input type="checkbox" checked={options.allowSameUid}
+                  onChange={(event) => onOptionsChange({ ...options, allowSameUid: event.target.checked })} />
+                <span>目标卡已具有与原卡相同的 UID</span>
+                <small>默认遇到相同 UID 会停止以保护原卡；仅在已换好目标卡时开启。</small>
+              </label>
               <label className="nfc-toggle">
                 <input
                   type="checkbox"
@@ -799,8 +823,8 @@ function WritePage({
                   <ShieldAlert size={14} /> 写入第 0 块（厂商块 / UID）
                 </span>
                 <small>
-                  原厂 NXP 卡片会直接拒绝该写入。只有 UID 卡（俗称魔术卡）能改写，
-                  写对才能完整克隆，写错会让卡片无法被识别。
+                  仅适用于支持标准认证后写第 0 块的 4 字节 UID 兼容卡（如部分 CUID）。
+                  不支持需要特殊解锁的 UID 卡；手机钱包空白卡请保持关闭。
                 </small>
               </label>
               {options.writeManufacturerBlock && (
@@ -841,10 +865,14 @@ function WritePage({
           <div className="nfc-card__heading">
             <h2>写入结果</h2>
             <span className={`nfc-chip${report.verified ? " is-ok" : ""}`}>
-              {report.verified ? "回读一致" : "未通过回读校验"}
+              {report.completeCopy ? "整卡写入并校验一致" : report.verified ? "已写块校验通过" : "未校验或校验未通过"}
             </span>
           </div>
           <dl className="nfc-summary">
+            <div>
+              <dt>UID 与原卡</dt><dd>{report.uidMatches ? "一致" : "不同"}</dd>
+            </div>
+            <div><dt>已验证块数</dt><dd>{report.blocksVerified}</dd></div>
             <div>
               <dt>目标卡 UID</dt>
               <dd className="nfc-mono">{formatUid(report.uid)}</dd>
@@ -866,11 +894,11 @@ function WritePage({
             <div>
               <dt>UID 块</dt>
               <dd>
-                {report.manufacturerBlockWritten === undefined
+                {report.manufacturerBlockWritten == null
                   ? "未尝试"
                   : report.manufacturerBlockWritten
                     ? "已写入"
-                    : "被卡片拒绝"}
+                    : "未写入（跳过或被拒绝）"}
               </dd>
             </div>
             <div>
@@ -878,6 +906,8 @@ function WritePage({
               <dd>{(report.durationMs / 1000).toFixed(1)} 秒</dd>
             </div>
           </dl>
+          {!report.completeCopy && <p className="nfc-hint">本次结果不代表整卡一致或门禁授权成功。</p>}
+          {report.verificationFailures.map((failure) => <p className="nfc-warning-line is-error" key={failure}>{failure}</p>)}
           {report.warnings.map((warning) => (
             <p className="nfc-warning-line" key={warning}>
               <ShieldAlert size={14} />
@@ -902,7 +932,7 @@ function WritePage({
   );
 }
 
-function DataPage({ dump, onCopy }: { dump: CardDump | null; onCopy: () => void }) {
+function DataPage({ dump, onCopy, onCompare }: { dump: CardDump | null; onCopy: () => void; onCompare: () => void }) {
   if (!dump) {
     return (
       <section className="nfc-card">
@@ -927,7 +957,14 @@ function DataPage({ dump, onCopy }: { dump: CardDump | null; onCopy: () => void 
           <button className="nfc-button" type="button" onClick={onCopy}>
             <Copy size={15} />复制 JSON
           </button>
+          <button className="nfc-button" type="button" onClick={onCompare}>
+            <ArrowLeftRight size={15} />前往回读对比
+          </button>
+          <button className="nfc-button" type="button" onClick={() => downloadCardDump(dump)}>
+            <Download size={15} />保存备份文件
+          </button>
         </div>
+        {dump.warnings.map((warning) => <p className="nfc-warning-line" key={warning}>{warning}</p>)}
         {dump.sectors.length > 0 && (
           <div className="nfc-table-wrap">
             <table className="nfc-table">
@@ -953,7 +990,7 @@ function DataPage({ dump, onCopy }: { dump: CardDump | null; onCopy: () => void 
                     <td className="nfc-mono">{sector.keyB ?? "未获取"}</td>
                     <td>{keySourceLabel[sector.keySource] ?? sector.keySource}</td>
                     <td className="nfc-mono">{sector.accessSummary ?? "—"}</td>
-                    <td>{sector.resolved ? "已读取" : (sector.message ?? "未读取")}</td>
+                    <td>{sector.message ?? (sector.resolved ? "数据与密钥已获取" : "未读取")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1003,7 +1040,7 @@ function DataPage({ dump, onCopy }: { dump: CardDump | null; onCopy: () => void 
           </table>
         </div>
         <p className="nfc-hint">
-          第 0 块是厂商块（UID），每个扇区的最后一块是尾块（保存 Key A / 权限位 / Key B）。
+          第 0 块是厂商块（UID），每个扇区的最后一块是尾块。下方显示原始回读字节，隐藏密钥会返回零；已确认的真实密钥保存在上方扇区表及 JSON 中，写入时会重建。
         </p>
       </section>
     </div>
@@ -1059,8 +1096,8 @@ function HelpPage() {
             <dd>
               MIFARE Classic 规定 <strong>Key A 永远不可回读</strong>：在常见的权限位下，卡片读到 Key A
               字段时一律返回 6 个零字节，而不是真实密钥。所以 Key A 只能靠“用它认证成功”来确定。
-              如果某个扇区是用 Key B 打开的，它的 Key A 就是未知的——复制时该扇区会保留目标卡原有的
-              Key A，并在结果里提示。若你知道密钥，在读取页填进去重新备份即可补齐。
+              工具会分别尝试 Key A 和 Key B；Key B 可读时直接保存其数据，不把认证被拒绝误认为密钥错误。
+              缺少任一隐藏密钥时会跳过整个尾块。若你知道密钥，在读取页填入后重新备份即可补齐。
             </dd>
           </div>
           <div>
@@ -1073,8 +1110,8 @@ function HelpPage() {
           <div>
             <dt>写入后新卡刷不开门</dt>
             <dd>
-              门禁系统可能校验 UID。普通原厂卡的 UID 无法改写，只有 UID 卡（魔术卡）能完整克隆；
-              确认系统是否还校验其他扇区数据。
+              请检查报告中的 UID、缺失块、密钥和校验结果。普通卡及手机钱包空白卡不能假定支持改 UID；
+              当目标 UID 无法与原卡一致时，需要门禁管理方为目标卡登记授权。
             </dd>
           </div>
         </dl>

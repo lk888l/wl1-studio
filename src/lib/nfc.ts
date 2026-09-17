@@ -64,6 +64,10 @@ export interface WriteReport {
   blocksSkipped: number;
   sectorsWritten: number;
   verified: boolean;
+  blocksVerified: number;
+  verificationFailures: string[];
+  uidMatches: boolean;
+  completeCopy: boolean;
   manufacturerBlockWritten?: boolean;
   durationMs: number;
   failures: string[];
@@ -91,6 +95,7 @@ export interface ReadOptions {
 
 export interface WriteOptions {
   writeManufacturerBlock: boolean;
+  allowSameUid: boolean;
   writeTrailers: boolean;
   verify: boolean;
   sectors: number[];
@@ -122,6 +127,7 @@ export const defaultWriteOptions = (): WriteOptions => ({
   // Off by default: a genuine card rejects it and a UID card accepts a value
   // that can render the clone unusable if the source UID was misread.
   writeManufacturerBlock: false,
+  allowSameUid: false,
   writeTrailers: true,
   verify: true,
   sectors: [],
@@ -156,12 +162,75 @@ export function byteLength(hex: string): number {
   return Math.floor(hex.length / 2);
 }
 
-/**
- * True when a dump still contains units the reader could not open, which is
- * what a write should warn about before touching a new card.
- */
+/** Counts unread blocks, including addresses absent from an imported backup. */
 export function dumpGaps(dump: CardDump): number {
-  return dump.units.filter((unit) => !unit.data).length;
+  const total = dump.kind === "classic1k" ? 64 : dump.kind === "classic4k" ? 256 : dump.units.length;
+  const readable = new Set(dump.units.filter((unit) => unit.data?.length === dump.unitSize * 2).map((unit) => unit.index));
+  return Math.max(0, total - readable.size);
+}
+
+export function missingKeySectors(dump: CardDump): SectorDump[] {
+  return dump.sectors.filter((sector) => !sector.keyA || !sector.keyB);
+}
+
+export function readSummary(dump: CardDump): string {
+  if (dump.kind === "ultralight") return `已记录 ${dump.units.length} 页，其中 ${dumpGaps(dump)} 页未读取。Type 2 型号与受保护区域限制请查看备份提示。`;
+  const gaps = dumpGaps(dump);
+  const keys = missingKeySectors(dump).length;
+  return `已读取 ${dump.label}，UID ${formatUid(dump.uid)}。` +
+    (gaps || keys ? `仍缺 ${gaps} 个块、${keys} 个扇区的密钥；尚不具备完整复制条件。` : "所有数据块和扇区密钥已取得；目标 UID 与写权限仍需确认。");
+}
+
+/** Validate imports before they enter UI state; native code validates again before RF writes. */
+export function parseCardDump(text: string): CardDump {
+  const value: unknown = JSON.parse(text);
+  const fail = (): never => { throw new Error("备份结构或数据无效，请导入完整的本工具 JSON 备份（未读块应保留为空）"); };
+  if (!value || typeof value !== "object") return fail();
+  const d = value as CardDump;
+  const hex = (value: unknown, bytes: number): value is string => typeof value === "string" && new RegExp(`^[0-9a-f]{${bytes * 2}}$`, "i").test(value);
+  const classic = d.kind === "classic1k" || d.kind === "classic4k";
+  if ((!classic && d.kind !== "ultralight") || (!hex(d.uid, 4) && !hex(d.uid, 7)) || !hex(d.atqa, 2)
+      || d.sak !== (d.kind === "classic1k" ? 8 : d.kind === "classic4k" ? 24 : 0)
+      || d.unitSize !== (classic ? 16 : 4) || typeof d.label !== "string"
+      || !Array.isArray(d.units) || !Array.isArray(d.sectors) || !Array.isArray(d.warnings)
+      || !d.warnings.every((warning) => typeof warning === "string")
+      || !Number.isFinite(d.readAt) || !Number.isFinite(d.durationMs)) return fail();
+  const total = d.kind === "classic1k" ? 64 : d.kind === "classic4k" ? 256 : d.units.length;
+  if (!total || total > 256 || d.units.length !== total) return fail();
+  const seen = new Set<number>();
+  for (const unit of d.units) {
+    if (!unit || !Number.isInteger(unit.index) || unit.index < 0 || unit.index >= total || seen.has(unit.index)
+        || (unit.data != null && !hex(unit.data, d.unitSize))) return fail();
+    seen.add(unit.index);
+    unit.sector = classic ? (unit.index < 128 ? Math.floor(unit.index / 4) : 32 + Math.floor((unit.index - 128) / 16)) : 0;
+    unit.isTrailer = classic && (unit.index < 128 ? unit.index % 4 === 3 : unit.index % 16 === 15);
+    unit.isManufacturer = classic ? unit.index === 0 : unit.index < 3;
+  }
+  const count = d.kind === "classic1k" ? 16 : d.kind === "classic4k" ? 40 : 0;
+  if (d.sectors.length !== count) return fail();
+  seen.clear();
+  for (const sector of d.sectors) {
+    if (!sector || !Number.isInteger(sector.index) || sector.index < 0 || sector.index >= count || seen.has(sector.index)) return fail();
+    seen.add(sector.index);
+    const first = sector.index < 32 ? sector.index * 4 : 128 + (sector.index - 32) * 16;
+    const blocks = sector.index < 32 ? 4 : 16;
+    if (sector.firstBlock !== first || sector.blockCount !== blocks || sector.trailerBlock !== first + blocks - 1
+        || (sector.keyA != null && !hex(sector.keyA, 6)) || (sector.keyB != null && !hex(sector.keyB, 6))
+        || typeof sector.resolved !== "boolean" || !["dictionary", "harvested", "manual", "none"].includes(sector.keySource)
+        || (sector.accessSummary != null && typeof sector.accessSummary !== "string")
+        || (sector.message != null && typeof sector.message !== "string")) return fail();
+  }
+  d.unresolvedSectors = d.sectors.filter((sector) => !sector.resolved).length;
+  return d;
+}
+
+export function downloadCardDump(dump: CardDump): void {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `nfc-${dump.uid}-${dump.readAt}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export class NfcGateway {

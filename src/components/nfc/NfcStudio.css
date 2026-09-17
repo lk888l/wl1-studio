@@ -90,7 +90,7 @@
 @media (prefers-reduced-motion: reduce) { .nfc-spin { animation-duration: 3s; } }
 
 .nfc-stack { display: grid; gap: 16px; }
-.nfc-card { padding: 18px 20px; border: 1px solid #fff; border-radius: 18px; background: #ffffffb8; box-shadow: 0 5px 26px #45608b08; }
+.nfc-card { min-width: 0; padding: 18px 20px; border: 1px solid #fff; border-radius: 18px; background: #ffffffb8; box-shadow: 0 5px 26px #45608b08; }
 .nfc-card h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.3px; }
 .nfc-card__heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
 .nfc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -156,4 +156,42 @@
   .nfc-sidebar { position: static; height: auto; min-height: 0; }
   .nfc-sidebar__hardware { display: none; }
   .nfc-nav { grid-auto-flow: column; overflow-x: auto; }
+}
+
+/* Read-back comparisons keep card snapshots separate from the latest read. */
+.nfc-compare-current { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 16px 0; padding: 15px; border: 1px solid var(--nfc-line); border-radius: 12px; background: #f6f8ff; }
+.nfc-compare-current > div { min-width: 0; overflow-wrap: anywhere; }
+.nfc-compare-current .nfc-hint { margin-top: 6px; }
+.nfc-compare-pool { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 14px; }
+.nfc-compare-entry { min-width: 0; padding: 15px; border: 1px solid var(--nfc-line); border-radius: 13px; background: #fafbfe; }
+.nfc-compare-entry.is-selected { border-color: #b8c7f7; background: #f6f8ff; }
+.nfc-compare-entry strong { overflow-wrap: anywhere; }
+.nfc-compare-entry .nfc-actions { margin-top: 12px; }
+.nfc-compare-entry button[aria-pressed="true"] { border-color: #b8c7f7; color: #3350c4; background: #e8edff; }
+.nfc-compare-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.nfc-compare-pair > div { min-width: 0; padding: 12px; border-radius: 10px; background: #f3f5fc; overflow-wrap: anywhere; }
+.nfc-compare-pair p { margin: 8px 0 0; }
+.nfc-compare-summary { margin-top: 14px; }
+.nfc-compare-status { display: inline-block; padding: 3px 7px; border-radius: 6px; font-size: 11px; white-space: nowrap; font-weight: 550; }
+.nfc-compare-status.is-equal { color: #2f8055; background: #edf8f1; }
+.nfc-compare-status.is-different { color: #ac3535; background: #ffebeb; }
+.nfc-compare-status.is-unknown { color: #8d641d; background: #fff1cc; }
+.nfc-compare-filters { display: flex; flex-wrap: wrap; gap: 12px; }
+.nfc-compare-filters label { display: grid; gap: 7px; color: #6f7b93; font-size: 11px; }
+.nfc-compare-filters select { padding: 8px 10px; border: 1px solid var(--nfc-line); border-radius: 9px; background: #fff; color: var(--nfc-ink); }
+.nfc-compare-table { margin-top: 12px; }
+.nfc-compare-table table { min-width: 720px; }
+.nfc-compare-table td:first-child { min-width: 90px; }
+.nfc-compare-table th:nth-child(2), .nfc-compare-table th:nth-child(3) { width: 37%; overflow-wrap: anywhere; }
+.nfc-compare-table td small { display: block; margin-top: 6px; color: #7c869c; white-space: nowrap; }
+.nfc-compare-bytes { display: grid; grid-template-columns: repeat(8, 2.5ch); gap: 4px 3px; width: max-content; }
+.nfc-compare-bytes span { text-align: center; padding: 3px 0; border-radius: 3px; background: #f2f4fa; }
+.nfc-compare-bytes .is-different { color: #a52525; background: #ffdddd; font-weight: 700; text-decoration: underline; }
+.nfc-compare-bytes .is-unknown { color: #885b11; background: #fff1cc; }
+.nfc-compare-empty { padding: 20px 12px; color: var(--nfc-muted); text-align: center; line-height: 1.8; }
+.nfc-compare-notes { margin-top: 14px; }
+.nfc-compare-notes summary { margin-bottom: 10px; color: #6f7b93; font-size: 12px; cursor: pointer; }
+@media (max-width: 600px) {
+  .nfc-compare-pair { grid-template-columns: minmax(0, 1fr); }
+  .nfc-compare-current .nfc-button { width: 100%; }
 }

@@ -101,7 +101,7 @@ impl CardInfo {
             CardKind::Classic1K | CardKind::Classic4K => (true, None),
             CardKind::Ultralight => (
                 true,
-                Some("按 4 字节页读取；NTAG 的配置页受锁定位保护，可能无法写入".into()),
+                Some("按 4 字节页读取；NTAG 写入仅覆盖用户页，保留 UID、锁定位与配置".into()),
             ),
             CardKind::Iso14443_4 => (
                 false,
@@ -154,9 +154,14 @@ pub struct SectorKeyOverride {
 #[serde(rename_all = "camelCase")]
 pub struct WriteOptions {
     /// Writing sector 0 block 0 replaces the UID. Genuine NXP cards refuse it;
-    /// UID ("magic") cards accept it. Off unless the operator opts in.
+    /// Some compatible cards accept it after standard authentication. Off by default.
     #[serde(default)]
     pub write_manufacturer_block: bool,
+    /// Required when a replacement intentionally has the source UID already.
+    #[serde(default)]
+    pub allow_same_uid: bool,
+    #[serde(default)]
+    pub expected_target_uid: Option<String>,
     #[serde(default = "default_true")]
     pub write_trailers: bool,
     #[serde(default = "default_true")]
@@ -185,6 +190,10 @@ pub struct WriteReport {
     pub blocks_skipped: u32,
     pub sectors_written: u32,
     pub verified: bool,
+    pub blocks_verified: u32,
+    pub verification_failures: Vec<String>,
+    pub uid_matches: bool,
+    pub complete_copy: bool,
     pub manufacturer_block_written: Option<bool>,
     pub duration_ms: u64,
     pub failures: Vec<String>,
@@ -246,7 +255,14 @@ impl SessionHandle {
             .map_err(|_| "NFC 会话已结束，请重新连接读卡器".to_owned())?;
         match receiver.recv_timeout(timeout) {
             Ok(result) => result,
-            Err(RecvTimeoutError::Timeout) => Err("NFC 操作等待超时".into()),
+            Err(RecvTimeoutError::Timeout) => {
+                self.cancel();
+                // Keep run_busy's ownership until the worker acknowledges the
+                // cancellation; otherwise a new job could clear its flag while
+                // the timed-out write is still touching the card.
+                let _ = receiver.recv();
+                Err("NFC 操作等待超时，当前任务已停止".into())
+            }
             Err(RecvTimeoutError::Disconnected) => {
                 Err("NFC 读取线程已退出，请重新连接读卡器".into())
             }
@@ -336,7 +352,6 @@ impl NfcState {
 
         let session_id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         let (jobs, receiver) = mpsc::channel();
-        let busy = Arc::clone(&self.inner.busy);
 
         let mut session = NfcSession {
             session_id,
@@ -354,15 +369,7 @@ impl NfcState {
             thread::Builder::new()
                 .name("nfc-pn532".into())
                 .spawn(move || {
-                    worker_loop(
-                        session_id,
-                        receiver,
-                        port,
-                        Arc::clone(&cancel),
-                        &stop,
-                        &busy,
-                        &app,
-                    );
+                    worker_loop(session_id, receiver, port, Arc::clone(&cancel), &stop, &app);
                     alive.store(false, Ordering::Release);
                     let _ = app.emit(
                         "nfc:event",
@@ -539,7 +546,6 @@ fn worker_loop(
     port: Box<dyn SerialPort>,
     cancel: Arc<AtomicBool>,
     stop: &AtomicBool,
-    busy: &AtomicBool,
     app: &AppHandle,
 ) {
     let mut link = Link::new(port, cancel);
@@ -565,7 +571,6 @@ fn worker_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        busy.store(false, Ordering::Release);
     }
 }
 
@@ -655,7 +660,16 @@ impl Link {
     }
 
     fn transact(&mut self, command: &[u8], timeout: Duration) -> Result<Vec<u8>, String> {
-        self.transact_with_preamble(command, timeout, 0)
+        let result = self.transact_with_preamble(command, timeout, 0);
+        if result.is_err() {
+            // UM0701 §6.2.2.3: host ACK aborts an unfinished command, so a
+            // cancelled scan cannot leak a late response into the next job.
+            let _ = self.port.write_all(&[0, 0, 0xFF, 0, 0xFF, 0]);
+            let _ = self.port.flush();
+            self.parser.clear();
+            self.needs_reselect = true;
+        }
+        result
     }
 
     /// `preamble` dummy bytes are prepended before the start code. The PN532
@@ -684,10 +698,18 @@ impl Link {
 
             match self.next_frame(Instant::now() + ACK_TIMEOUT) {
                 Ok(Pn532Frame::Ack) => {
-                    return self.await_response(timeout);
+                    return self.await_response(command[0], timeout);
                 }
                 Ok(Pn532Frame::Error(code)) => {
                     return Err(describe_error_frame(code));
+                }
+                Ok(Pn532Frame::Response(body))
+                    if body.first() == Some(&pn532::CHIP_TFI)
+                        && body.get(1) == Some(&command[0].wrapping_add(1)) =>
+                {
+                    // A valid response proves completion even if the ACK was
+                    // lost. In particular, do not replay a completed write.
+                    return Ok(body[1..].to_vec());
                 }
                 Ok(other) => {
                     last_error = format!("PN532 应答异常: {other:?}");
@@ -701,13 +723,20 @@ impl Link {
     /// Waits for the information frame and returns its payload with the frame
     /// identifier stripped, so every caller receives `[response_code, params..]`
     /// and no parser has to know where the TFI sits.
-    fn await_response(&mut self, timeout: Duration) -> Result<Vec<u8>, String> {
+    fn await_response(&mut self, command: u8, timeout: Duration) -> Result<Vec<u8>, String> {
         let deadline = Instant::now() + timeout;
         loop {
             match self.next_frame(deadline)? {
                 Pn532Frame::Response(body) => {
                     return match body.split_first() {
-                        Some((&pn532::CHIP_TFI, rest)) => Ok(rest.to_vec()),
+                        Some((&pn532::CHIP_TFI, rest))
+                            if rest.first() == Some(&command.wrapping_add(1)) =>
+                        {
+                            Ok(rest.to_vec())
+                        }
+                        Some((&pn532::CHIP_TFI, _)) => {
+                            Err("PN532 响应命令不匹配，请重新连接读卡器".into())
+                        }
                         Some((tfi, _)) => {
                             Err(format!("PN532 响应帧标识异常：期望 0xD5，实际 0x{tfi:02X}"))
                         }
@@ -790,9 +819,18 @@ impl Link {
             return Ok(());
         }
         self.release_target(target.target);
-        let Some(next) = self.list_passive_target()? else {
-            return Err("卡片已离开射频场，请重新放卡后重试".into());
-        };
+        // A field reset also clears Crypto1/halt state on cards that do not
+        // recover through InRelease alone.
+        self.transact(&[pn532::CMD_RF_CONFIGURATION, 0x01, 0x00], CONTROL_TIMEOUT)?;
+        thread::sleep(Duration::from_millis(10));
+        self.transact(&[pn532::CMD_RF_CONFIGURATION, 0x01, 0x01], CONTROL_TIMEOUT)?;
+        let next = self.scan(Instant::now() + Duration::from_secs(2))?;
+        if next.uid != target.uid
+            || next.sel_res != target.sel_res
+            || next.sens_res != target.sens_res
+        {
+            return Err("检测到卡片更换，已中止；请放回当前操作的卡片后重试".into());
+        }
         *target = next;
         self.needs_reselect = false;
         Ok(())
@@ -813,6 +851,7 @@ impl Link {
         loop {
             self.check_cancelled()?;
             if let Some(target) = self.list_passive_target()? {
+                self.needs_reselect = false;
                 return Ok(target);
             }
             if Instant::now() >= deadline {
@@ -830,14 +869,12 @@ impl Link {
         key_b: bool,
     ) -> Result<bool, String> {
         self.ensure_selected(target)?;
-        let Some(prefix) = target.uid.get(..4) else {
-            return Err("卡片 UID 少于 4 字节，无法进行 MIFARE 认证".into());
-        };
+        let prefix = authentication_uid(&target.uid)?;
         let mut data = Vec::with_capacity(12);
         data.push(if key_b { 0x61 } else { 0x60 });
         data.push(block);
         data.extend_from_slice(key);
-        data.extend_from_slice(prefix);
+        data.extend_from_slice(&prefix);
         let response = self.transact(
             &pn532::in_data_exchange_command(target.target, &data),
             RF_TIMEOUT,
@@ -940,10 +977,19 @@ impl Link {
         options: &ReadOptions,
         mut progress: impl FnMut(Progress),
     ) -> Result<CardDump, String> {
+        for key in &options.extra_keys {
+            mifare::parse_key(key)?;
+        }
+        for entry in &options.sector_keys {
+            mifare::parse_key(&entry.key)?;
+        }
         let started = Instant::now();
         // Card-removal strikes are per operation; a previous run's timeouts
         // must not shorten this one.
         self.strikes = 0;
+        self.transact(&[pn532::CMD_RF_CONFIGURATION, 0x01, 0x00], CONTROL_TIMEOUT)?;
+        thread::sleep(Duration::from_millis(10));
+        self.transact(&[pn532::CMD_RF_CONFIGURATION, 0x01, 0x01], CONTROL_TIMEOUT)?;
         let mut target = self.scan(Instant::now() + Duration::from_secs(45))?;
         let info = CardInfo::from_target(&target);
         if !info.supported {
@@ -956,7 +1002,7 @@ impl Link {
         let mut dump = if kind.is_classic() {
             self.read_classic(&mut target, kind, options, &mut progress)?
         } else {
-            self.read_ultralight(&target, &mut progress)?
+            self.read_ultralight(&mut target, &mut progress)?
         };
         dump.uid = info.uid;
         dump.atqa = info.atqa;
@@ -977,159 +1023,165 @@ impl Link {
         progress: &mut impl FnMut(Progress),
     ) -> Result<CardDump, String> {
         let sectors = mifare::sector_map(kind);
-        let units_per_sector = |sector: &mifare::Sector| usize::from(sector.block_count);
-        let total_units: usize = sectors.iter().map(units_per_sector).sum();
-
-        let mut extra_keys = Vec::new();
-        for text in &options.extra_keys {
-            extra_keys.push(mifare::parse_key(text)?);
-        }
-
-        let mut units: Vec<Option<[u8; mifare::BLOCK_BYTES]>> = vec![None; total_units];
+        let total_units: usize = sectors
+            .iter()
+            .map(|sector| usize::from(sector.block_count))
+            .sum();
+        let extra_keys: Vec<_> = options
+            .extra_keys
+            .iter()
+            .map(|text| mifare::parse_key(text))
+            .collect::<Result<_, _>>()?;
+        let mut units = vec![None; total_units];
         let mut sector_dumps = Vec::with_capacity(sectors.len());
-        // Keys confirmed by a successful authentication, shared across sectors
-        // because a card almost always reuses one key set.
-        let mut confirmed: Vec<([u8; KEY_BYTES], bool)> = Vec::new();
-        let mut unresolved = 0_u8;
+        let mut confirmed = Vec::new();
+        let mut warnings = Vec::new();
 
         for sector in &sectors {
-            progress(Progress {
-                phase: "read",
-                current: u32::from(sector.index),
-                total: u32::from(kind_sector_count(kind)),
-                message: format!(
-                    "读取扇区 {} / {}",
-                    sector.index + 1,
-                    kind_sector_count(kind)
-                ),
-            });
-
-            let override_key = match options
+            let mut candidates = Vec::new();
+            for entry in options
                 .sector_keys
                 .iter()
-                .find(|entry| entry.sector == sector.index)
+                .filter(|entry| entry.sector == sector.index)
             {
-                Some(entry) => Some((mifare::parse_key(&entry.key)?, entry.key_b)),
-                None => None,
-            };
-
-            let trailer = sector.trailer_block() as u8;
-            let candidates = sector_key_candidates(&confirmed, &extra_keys, override_key);
-
-            let mut opened = None;
-            for (key, key_b, source) in candidates {
-                if self.authenticate(target, trailer, &key, key_b)? {
-                    opened = Some((key, key_b, source));
+                candidates.push((
+                    mifare::parse_key(&entry.key)?,
+                    entry.key_b,
+                    KeySource::Manual,
+                ));
+            }
+            candidates.extend(sector_key_candidates(&confirmed, &extra_keys, None));
+            let mut tried = Vec::new();
+            let mut key_a = None;
+            let mut key_b = None;
+            let mut source = KeySource::None;
+            let trailer_slot =
+                unit_slot(&sectors, sector.trailer_block()).expect("valid sector geometry");
+            for (key, is_b, key_source) in candidates {
+                self.check_cancelled()?;
+                if (is_b && key_b.is_some())
+                    || (!is_b && key_a.is_some())
+                    || tried.contains(&(key, is_b))
+                {
+                    continue;
+                }
+                tried.push((key, is_b));
+                progress(Progress {
+                    phase: "read",
+                    current: u32::from(sector.index),
+                    total: u32::from(kind_sector_count(kind)),
+                    message: format!(
+                        "扇区 {} / {}：认证 Key {}（候选 {}）",
+                        sector.index + 1,
+                        sectors.len(),
+                        if is_b { "B" } else { "A" },
+                        tried.len()
+                    ),
+                });
+                if !self.authenticate(target, sector.trailer_block() as u8, &key, is_b)? {
+                    continue;
+                }
+                source = key_source;
+                if is_b {
+                    key_b = Some(mifare::format_key(&key));
+                } else {
+                    key_a = Some(mifare::format_key(&key));
+                }
+                if !confirmed.contains(&(key, is_b)) {
+                    confirmed.push((key, is_b));
+                }
+                // Read the trailer first, then fill every block this key can
+                // access. A denial loses authentication, so reauthenticate
+                // before the next block instead of cascading failures.
+                for block in std::iter::once(sector.trailer_block()).chain(sector.data_blocks()) {
+                    if units[usize::from(block)].is_some() {
+                        continue;
+                    }
+                    if self.needs_reselect && !self.authenticate(target, block as u8, &key, is_b)? {
+                        continue;
+                    }
+                    units[usize::from(block)] = self.read_block(target, block as u8)?;
+                }
+                if let Some(trailer) = units[trailer_slot] {
+                    if mifare::decode_access_bits(&trailer)
+                        .is_some_and(|bits| bits.key_b_readable())
+                    {
+                        // Table 7: these bytes are readable data. Authenticating
+                        // with them as Key B is forbidden even when correct.
+                        key_b = Some(mifare::format_hex(&trailer[10..16]));
+                    }
+                }
+                if key_a.is_some()
+                    && key_b.is_some()
+                    && sector
+                        .blocks()
+                        .all(|block| units[usize::from(block)].is_some())
+                {
                     break;
                 }
             }
-
-            let Some((key, key_b, source)) = opened else {
-                unresolved = unresolved.saturating_add(1);
-                for block in sector.blocks() {
-                    let slot = unit_slot(&sectors, block);
-                    if let Some(slot) = slot {
-                        units[slot] = None;
-                    }
-                }
-                sector_dumps.push(SectorDump {
-                    index: sector.index,
-                    first_block: sector.first_block,
-                    block_count: sector.block_count,
-                    trailer_block: sector.trailer_block(),
-                    key_a: None,
-                    key_b: None,
-                    key_source: KeySource::None,
-                    resolved: false,
-                    access_summary: None,
-                    message: Some("字典与已知密钥均无法认证该扇区".into()),
-                });
-                continue;
-            };
-
-            confirmed.push((key, key_b));
-
-            let mut failures = Vec::new();
-            for block in sector.blocks() {
-                let Some(slot) = unit_slot(&sectors, block) else {
-                    continue;
-                };
-                match self.read_block(target, block as u8)? {
-                    Some(data) => units[slot] = Some(data),
-                    None => failures.push(block),
-                }
+            let resolved = key_a.is_some() || key_b.is_some();
+            let missing = sector
+                .blocks()
+                .filter(|block| units[usize::from(*block)].is_none())
+                .count();
+            let access = units[trailer_slot].and_then(|bytes| mifare::decode_access_bits(&bytes));
+            let mut messages = Vec::new();
+            if missing > 0 {
+                messages.push(format!("{missing} 个块未读取"));
             }
-
-            let trailer_data =
-                unit_slot(&sectors, sector.trailer_block()).and_then(|slot| units[slot]);
-            let (key_a_hex, key_b_hex, key_b_source) =
-                self.resolve_trailer_keys(target, sector, trailer_data, &key, key_b, source)?;
-
-            let access_summary = trailer_data
-                .and_then(|data| mifare::decode_access_bits(&data))
-                .map(|bits| bits.summary());
-
+            if key_a.is_none() {
+                messages.push("Key A 未知".into());
+            }
+            if key_b.is_none() {
+                messages.push("Key B 未知".into());
+            }
+            if access.is_none() {
+                messages.push("权限位不可用".into());
+            }
+            if !messages.is_empty() {
+                warnings.push(format!(
+                    "扇区 {}：{}；复制前请补齐，未知密钥不会用零代替",
+                    sector.index,
+                    messages.join("，")
+                ));
+            }
             sector_dumps.push(SectorDump {
                 index: sector.index,
                 first_block: sector.first_block,
                 block_count: sector.block_count,
                 trailer_block: sector.trailer_block(),
-                key_a: key_a_hex,
-                key_b: key_b_hex,
-                key_source: key_b_source,
-                resolved: true,
-                access_summary,
-                message: if failures.is_empty() {
-                    None
-                } else {
-                    Some(format!("{} 个块读取失败（权限位限制）", failures.len()))
-                },
+                key_a,
+                key_b,
+                key_source: source,
+                resolved,
+                access_summary: access.map(|bits| bits.summary()),
+                message: (!messages.is_empty()).then(|| messages.join("，")),
             });
         }
-
-        let unresolved_sectors = unresolved;
-        let hidden_key_a: Vec<u8> = sector_dumps
+        let unresolved_sectors = sector_dumps
             .iter()
-            .filter(|sector| sector.resolved && sector.key_a.is_none())
-            .map(|sector| sector.index)
-            .collect();
-        let mut warnings = Vec::new();
-        if !hidden_key_a.is_empty() {
-            // Worth surfacing up front: these are the sectors whose trailers a
-            // clone cannot reproduce, and the operator may know the key and want
-            // to enter it before making a copy.
-            warnings.push(format!(
-                "{} 个扇区的 Key A 无法读出（MIFARE 规定不回读 Key A）：扇区 {}。\
-                 复制时这些扇区会保留目标卡原有的 Key A",
-                hidden_key_a.len(),
-                hidden_key_a
-                    .iter()
-                    .map(u8::to_string)
-                    .collect::<Vec<_>>()
-                    .join("、")
-            ));
-        }
-        let units = units
-            .into_iter()
-            .enumerate()
-            .map(|(index, data)| DataUnit {
-                index: index as u16,
-                sector: sector_of_block(&sectors, index as u16),
-                data: data.map(|bytes| mifare::format_hex(&bytes)),
-                error: data.is_none().then(|| "未读取".to_owned()),
-                is_trailer: is_trailer(&sectors, index as u16),
-                is_manufacturer: index == 0,
-            })
-            .collect();
-
+            .filter(|sector| !sector.resolved)
+            .count() as u8;
         Ok(CardDump {
             uid: String::new(),
             atqa: String::new(),
             sak: 0,
             kind,
-            label: kind.label().to_owned(),
+            label: kind.label().into(),
             unit_size: mifare::BLOCK_BYTES as u8,
-            units,
+            units: units
+                .into_iter()
+                .enumerate()
+                .map(|(index, data)| DataUnit {
+                    index: index as u16,
+                    sector: sector_of_block(&sectors, index as u16),
+                    data: data.map(|bytes| mifare::format_hex(&bytes)),
+                    error: data.is_none().then(|| "未读取：密钥或访问权限不足".into()),
+                    is_trailer: is_trailer(&sectors, index as u16),
+                    is_manufacturer: index == 0,
+                })
+                .collect(),
             sectors: sector_dumps,
             read_at: 0,
             duration_ms: 0,
@@ -1138,131 +1190,72 @@ impl Link {
         })
     }
 
-    // Key selection for one sector lives in a free function so it can be tested
-    // without a port attached.
-
-    /// Turns the bytes read out of a sector trailer into key values.
-    ///
-    /// Two rules matter here, and both were established against hardware:
-    ///
-    /// 1. A key is only recorded once the card has authenticated with it. The
-    ///    dump must never carry a key inferred from an access-bit layout.
-    /// 2. **The trailer's Key A field is not the sector's Key A.** Under the
-    ///    usual `FF 07 80` access bits a MIFARE Classic card refuses to disclose
-    ///    Key A and returns six zero bytes in its place on every read. The real
-    ///    Key A is only knowable by having authenticated with it.
-    ///
-    /// So when the sector was opened with Key B, Key A stays `None` rather than
-    /// being guessed from the zeros or mislabelled with the Key B value. The
-    /// writer treats an unknown Key A by preserving the target card's own.
-    fn resolve_trailer_keys(
-        &mut self,
-        target: &mut PassiveTarget,
-        sector: &mifare::Sector,
-        trailer: Option<[u8; mifare::BLOCK_BYTES]>,
-        working_key: &[u8; KEY_BYTES],
-        working_is_b: bool,
-        source: KeySource,
-    ) -> Result<(Option<String>, Option<String>, KeySource), String> {
-        let Some(trailer) = trailer else {
-            return Ok((None, None, source));
-        };
-        let mut key_a = None;
-        let mut key_b = None;
-        let trailer_block = sector.trailer_block() as u8;
-
-        let a_bytes: [u8; KEY_BYTES] = trailer[0..KEY_BYTES].try_into().unwrap_or([0; KEY_BYTES]);
-        let b_bytes: [u8; KEY_BYTES] = trailer[10..16].try_into().unwrap_or([0; KEY_BYTES]);
-
-        // The key that opened the sector is known to be valid for its type.
-        if working_is_b {
-            key_b = Some(mifare::format_key(working_key));
-        } else {
-            key_a = Some(mifare::format_key(working_key));
+    /// GET_VERSION uses InCommunicateThru: InDataExchange interprets 0x60 as
+    /// Classic authentication and rejects its short Type 2 form.
+    fn type2_layout(&mut self, target: &mut PassiveTarget) -> Result<Type2Layout, String> {
+        self.ensure_selected(target)?;
+        let response = self.transact(&[0x42, 0x60], RF_TIMEOUT)?;
+        if response.get(1) == Some(&0) {
+            if let Some(layout) = Type2Layout::from_version(&response[2..]) {
+                return Ok(layout);
+            }
         }
-
-        // Probe the trailer's Key A field, which succeeds only on cards that do
-        // disclose it (or when the real Key A really is all zeros).
-        if key_a.is_none() && self.authenticate(target, trailer_block, &a_bytes, false)? {
-            key_a = Some(mifare::format_key(&a_bytes));
-        }
-        // Key B *is* disclosed, but is still confirmed rather than trusted: it
-        // is the value a clone writes back, so a wrong one breaks the copy.
-        if key_b.is_none() && self.authenticate(target, trailer_block, &b_bytes, true)? {
-            key_b = Some(mifare::format_key(&b_bytes));
-        }
-        Ok((key_a, key_b, source))
+        self.needs_reselect = true;
+        // Legacy Ultralight has no GET_VERSION. Only the common user pages
+        // 4..15 are writable without a positive model identification.
+        Ok(Type2Layout {
+            pages: 16,
+            user_end: 16,
+            identified: false,
+        })
     }
 
     fn read_ultralight(
         &mut self,
-        target: &PassiveTarget,
+        target: &mut PassiveTarget,
         progress: &mut impl FnMut(Progress),
     ) -> Result<CardDump, String> {
-        let mut pages: Vec<Option<[u8; 4]>> = Vec::new();
-        let mut page = 0_u8;
-        let mut consecutive_misses = 0_u32;
-        while page <= mifare::MAX_ULTRALIGHT_PAGE {
+        let layout = self.type2_layout(target)?;
+        let mut units = Vec::new();
+        for page in (0..layout.pages).step_by(4) {
             progress(Progress {
                 phase: "read",
                 current: u32::from(page),
-                total: u32::from(mifare::MAX_ULTRALIGHT_PAGE),
+                total: u32::from(layout.pages),
                 message: format!("读取第 {page} 页…"),
             });
-            let response = self.transact(
-                &pn532::in_data_exchange_command(target.target, &[0x30, page]),
-                RF_TIMEOUT,
-            )?;
-            let (status, data) = pn532::parse_data_exchange(&response)?;
-            if status != 0x00 || data.len() < 4 {
-                // Past the last page the card stops answering; that is the end
-                // of the tag, not an error.
-                consecutive_misses += 1;
-                if consecutive_misses >= 2 {
-                    break;
-                }
-                page = page.saturating_add(4);
-                continue;
+            // Avoid Type 2 READ rollover at the end of the physical memory.
+            let start = page.min(layout.pages - 4);
+            let data = self.read_block(target, start as u8)?;
+            for index in page..(page + 4).min(layout.pages) {
+                let offset = usize::from(index - start) * 4;
+                units.push(DataUnit {
+                    index,
+                    sector: 0,
+                    data: data.map(|bytes| mifare::format_hex(&bytes[offset..offset + 4])),
+                    error: data.is_none().then(|| "未读取：权限限制或射频错误".into()),
+                    is_trailer: false,
+                    is_manufacturer: index < 3,
+                });
             }
-            consecutive_misses = 0;
-            for chunk in data.chunks_exact(4) {
-                pages.push(Some(chunk.try_into().unwrap_or([0; 4])));
-            }
-            page = page.saturating_add(4);
         }
-        if pages.is_empty() {
-            return Err("未能读取到任何页，卡片可能已离开射频场".into());
+        let mut warnings = vec!["Type 2 标签仅复制用户数据页；UID、OTP、锁定位、配置和密码不复制。密码回读的零不代表真实密码".into()];
+        if !layout.identified {
+            warnings.push("具体 Type 2 型号未确认，仅备份前 16 页，不能视为整卡备份".into());
         }
-
-        let units = pages
-            .into_iter()
-            .enumerate()
-            .map(|(index, data)| DataUnit {
-                index: index as u16,
-                sector: 0,
-                data: data.map(|bytes| mifare::format_hex(&bytes)),
-                error: data.is_none().then(|| "未读取".to_owned()),
-                is_trailer: false,
-                is_manufacturer: index < 3,
-            })
-            .collect();
-
         Ok(CardDump {
             uid: String::new(),
             atqa: String::new(),
             sak: 0,
             kind: CardKind::Ultralight,
-            label: CardKind::Ultralight.label().to_owned(),
+            label: CardKind::Ultralight.label().into(),
             unit_size: 4,
             units,
             sectors: Vec::new(),
             read_at: 0,
             duration_ms: 0,
             unresolved_sectors: 0,
-            warnings: vec![
-                "Ultralight / NTAG 的备份无法写回已经锁定的配置页；写入前请确认目标卡未被锁定"
-                    .into(),
-            ],
+            warnings,
         })
     }
 
@@ -1273,6 +1266,7 @@ impl Link {
         mut progress: impl FnMut(Progress),
     ) -> Result<WriteReport, String> {
         let started = Instant::now();
+        validate_write_dump(dump, options)?;
         self.strikes = 0;
         if !dump.is_readable() {
             return Err("备份中没有可用数据，请先完整读取原卡".into());
@@ -1294,15 +1288,34 @@ impl Link {
             ));
         }
 
+        if options
+            .expected_target_uid
+            .as_ref()
+            .is_some_and(|uid| !target_info.uid.eq_ignore_ascii_case(uid))
+        {
+            self.release_target(target.target);
+            return Err("当前卡不是指定目标，已停止写入".into());
+        }
+        if options.write_manufacturer_block && target.uid.len() != 4 {
+            self.release_target(target.target);
+            return Err("目标必须也是 4 字节 UID，无法跨 UID 长度复制厂商块".into());
+        }
+        if target_info.uid.eq_ignore_ascii_case(&dump.uid) && !options.allow_same_uid {
+            self.release_target(target.target);
+            return Err("当前卡与原卡 UID 相同，已停止以保护原卡。请换上目标卡；若目标本来就使用相同 UID，请开启对应选项".into());
+        }
+        if !target_info.uid.eq_ignore_ascii_case(&dump.uid) && !options.write_manufacturer_block {
+            warnings.push("目标 UID 与原卡不同。本次只复制可写数据；校验 UID 的门禁仍可能拒绝。手机钱包空白卡不能假定支持改 UID".into());
+        }
         let mut target_keys = Vec::new();
         for text in &options.target_keys {
             target_keys.push(mifare::parse_key(text)?);
         }
-        for text in dump
-            .sectors
-            .iter()
-            .filter_map(|sector| sector.key_a.as_deref())
-        {
+        for text in dump.sectors.iter().flat_map(|sector| {
+            [sector.key_a.as_deref(), sector.key_b.as_deref()]
+                .into_iter()
+                .flatten()
+        }) {
             if let Ok(key) = mifare::parse_key(text) {
                 target_keys.push(key);
             }
@@ -1318,10 +1331,16 @@ impl Link {
                 &mut progress,
             )?
         } else {
-            self.write_ultralight(&target, dump, &mut warnings, &mut progress)?
+            self.write_ultralight(&mut target, dump, options, &mut warnings, &mut progress)?
         };
         report.duration_ms = started.elapsed().as_millis() as u64;
-        report.uid = target_info.uid;
+        report.uid = mifare::format_hex(&target.uid);
+        report.uid_matches = report.uid.eq_ignore_ascii_case(&dump.uid);
+        report.complete_copy = report.verified
+            && report.uid_matches
+            && report.blocks_skipped == 0
+            && report.blocks_written as usize == dump.units.len()
+            && dump.unresolved_sectors == 0;
         report.warnings = warnings;
         self.release_target(target.target);
         Ok(report)
@@ -1337,358 +1356,463 @@ impl Link {
         progress: &mut impl FnMut(Progress),
     ) -> Result<WriteReport, String> {
         let sectors = mifare::sector_map(dump.kind);
-        let selected: Vec<&mifare::Sector> = sectors
+        let selected: Vec<_> = sectors
             .iter()
             .filter(|sector| options.sectors.is_empty() || options.sectors.contains(&sector.index))
             .collect();
-
-        let mut blocks_written = 0_u32;
-        let mut blocks_failed = 0_u32;
-        let mut blocks_skipped = 0_u32;
-        let mut sectors_written = 0_u32;
-        let mut failures = Vec::new();
-        let mut skips = Vec::new();
-        let mut manufacturer_result = None;
-        // Keys proven on the target, reused across sectors.
-        let mut confirmed: Vec<[u8; KEY_BYTES]> = Vec::new();
-        // Which key opened each sector on the target. Verification needs it
-        // whenever the trailer was left alone, because then the card still
-        // carries its own keys and the dump's keys will not authenticate.
-        let mut opened_with: Vec<(u8, [u8; KEY_BYTES], bool)> = Vec::new();
-
-        for sector in &selected {
+        let mut report = WriteReport::empty();
+        let mut confirmed = Vec::new();
+        let mut manufacturer_keys = Vec::new();
+        for (position, sector) in selected.iter().enumerate() {
             progress(Progress {
                 phase: "write",
-                current: u32::from(sector.index),
+                current: position as u32,
                 total: selected.len() as u32,
-                message: format!("写入扇区 {}", sector.index),
+                message: format!("写入扇区 {}（数据块校验后再写密钥）", sector.index),
             });
-
-            // A sector the source card would not give up has nothing to write.
-            let Some(dump_sector) = dump
+            let before_failed = report.blocks_failed;
+            let before_skipped = report.blocks_skipped;
+            let before_written = report.blocks_written;
+            let before_verification_failures = report.verification_failures.len();
+            let mut keys: Vec<_> = sector_key_candidates(&confirmed, target_keys, None)
+                .into_iter()
+                .map(|(key, is_b, _)| (key, is_b))
+                .collect();
+            for block in sector.data_blocks().filter(|block| *block != 0) {
+                let Some(data) = dump.unit(block) else {
+                    report.skip(format!("块 {block}：备份缺失"));
+                    continue;
+                };
+                if let Some(key) = self.write_with_keys(target, block as u8, &data, &keys)? {
+                    report.blocks_written += 1;
+                    if !confirmed.contains(&key) {
+                        confirmed.push(key);
+                    }
+                    keys.retain(|entry| *entry != key);
+                    keys.insert(0, key);
+                    // Check before changing access bits: the source trailer
+                    // may make a written block unreadable with the old key.
+                    if options.verify {
+                        if self.verify_data_block(target, block as u8, &data, &keys)? {
+                            report.blocks_verified += 1;
+                        } else {
+                            report
+                                .verification_failures
+                                .push(format!("块 {block}：写后回读不一致或不可读"));
+                        }
+                    }
+                } else {
+                    report.blocks_failed += 1;
+                    report
+                        .failures
+                        .push(format!("块 {block}：目标密钥或写权限不允许"));
+                }
+            }
+            let trailer_block = sector.trailer_block();
+            let source_sector = dump
                 .sectors
                 .iter()
-                .find(|entry| entry.index == sector.index && entry.resolved)
-            else {
-                continue;
-            };
-
-            let trailer_block = sector.trailer_block() as u8;
-            // The target's *current* key opens the sector; the dump's key is
-            // what gets written into the trailer afterwards.
-            let mut candidates: Vec<[u8; KEY_BYTES]> = Vec::new();
-            for key in &confirmed {
-                candidates.push(*key);
-            }
-            for key in target_keys {
-                candidates.push(*key);
-            }
-            for key in mifare::DEFAULT_KEYS {
-                candidates.push(key);
-            }
-            // Key A and Key B are tried separately so the sector's actual key
-            // type is known; verification has to re-authenticate the same way.
-            let mut opened = None;
-            for key in candidates {
-                if self.authenticate(target, trailer_block, &key, false)? {
-                    opened = Some((key, false));
-                    break;
-                }
-                if self.authenticate(target, trailer_block, &key, true)? {
-                    opened = Some((key, true));
-                    break;
-                }
-            }
-            let Some((open_key, open_is_b)) = opened else {
-                blocks_failed += u32::from(sector.block_count);
-                failures.push(format!(
-                    "扇区 {}：目标卡认证失败，无法写入（请提供该卡当前的密钥）",
+                .find(|entry| entry.index == sector.index);
+            let trailer = source_sector.and_then(|entry| {
+                dump.unit(trailer_block).and_then(|bytes| {
+                    prepare_trailer(&bytes, entry.key_a.as_deref(), entry.key_b.as_deref())
+                })
+            });
+            if !options.write_trailers {
+                report.skip(format!("扇区 {}：保留目标密钥与权限位", sector.index));
+            } else if report.blocks_failed != before_failed
+                || report.blocks_skipped != before_skipped
+                || report.verification_failures.len() != before_verification_failures
+            {
+                report.skip(format!(
+                    "扇区 {}：数据未完整写入或校验失败，保留尾块便于重试",
                     sector.index
                 ));
-                continue;
-            };
-            confirmed.push(open_key);
-            opened_with.push((sector.index, open_key, open_is_b));
-
-            for block in sector.data_blocks() {
-                let Some(source) = dump.unit(block) else {
-                    continue;
-                };
-                if block == 0 && !options.write_manufacturer_block {
-                    if manufacturer_result.is_none() {
-                        manufacturer_result = Some(false);
-                        warnings.push(
-                            "已跳过第 0 块（厂商块/UID）。原厂卡拒绝改写该块；如需完整克隆请改用 UID 卡并开启该选项"
-                                .into(),
-                        );
+            } else if let Some(trailer) = trailer {
+                if self
+                    .write_with_keys(target, trailer_block as u8, &trailer, &keys)?
+                    .is_some()
+                {
+                    report.blocks_written += 1;
+                    let key_a = trailer[..6].try_into().expect("trailer Key A");
+                    let key_b = trailer[10..16].try_into().expect("trailer Key B");
+                    keys = vec![(key_a, false)];
+                    if !mifare::decode_access_bits(&trailer)
+                        .expect("validated trailer")
+                        .key_b_readable()
+                    {
+                        keys.push((key_b, true));
                     }
-                    continue;
-                }
-                if block == 0 {
-                    // Block 0 is `UID BCC SAK ATQA manufacturer`. The BCC is the
-                    // XOR of the four UID bytes, and a clone that carries a
-                    // wrong one will not be recognised by a reader, so a
-                    // mismatch is surfaced before the write rather than after.
-                    if mifare::manufacturer_bcc_is_valid(&source) == Some(false) {
-                        warnings.push(
-                            "第 0 块的 BCC 校验字节与 UID 不匹配，写回后多数读卡器将无法识别；请确认备份来源"
-                                .into(),
-                        );
-                    }
-                }
-                match self.write_block(target, block as u8, &source) {
-                    Ok(true) => {
-                        blocks_written += 1;
-                        if block == 0 {
-                            manufacturer_result = Some(true);
+                    if options.verify {
+                        if self.verify_trailer(target, trailer_block as u8, &trailer)? {
+                            report.blocks_verified += 1;
+                        } else {
+                            report
+                                .verification_failures
+                                .push(format!("扇区 {}：尾块密钥或权限校验失败", sector.index));
                         }
                     }
-                    Ok(false) => {
-                        blocks_failed += 1;
-                        if block == 0 {
-                            // A refused manufacturer block is the expected
-                            // outcome on a genuine card, so it is reported as a
-                            // finding rather than as a generic write failure.
-                            manufacturer_result = Some(false);
-                            warnings.push(
-                                "第 0 块（厂商块/UID）写入被卡片拒绝：这是原厂卡的正常行为，UID 无法改写"
-                                    .into(),
-                            );
-                            continue;
-                        }
-                        failures.push(format!("块 {block} 写入未确认"));
-                    }
-                    Err(error) => return Err(error),
+                } else {
+                    report.blocks_failed += 1;
+                    report
+                        .failures
+                        .push(format!("扇区 {}：尾块写入被拒绝", sector.index));
                 }
+            } else {
+                report.skip(format!(
+                    "扇区 {}：缺少原卡 Key A / Key B 或尾块，保留目标密钥与权限位",
+                    sector.index
+                ));
             }
-
-            // The trailer goes last: writing it swaps the sector's keys, so any
-            // earlier write would have to re-authenticate with the new values.
-            if options.write_trailers {
-                let Some(trailer) = dump.unit(sector.trailer_block()) else {
-                    continue;
-                };
-                // A trailer whose access nibbles are not self-complementary was
-                // written incorrectly on the source card. Reproducing it can
-                // make the sector permanently inaccessible, so it is refused
-                // rather than copied.
-                if mifare::decode_access_bits(&trailer).is_none() {
-                    blocks_failed += 1;
-                    failures.push(format!(
-                        "扇区 {} 尾块的权限位不自洽，写回会永久锁死该扇区，已跳过",
-                        sector.index
-                    ));
-                    continue;
-                }
-                // The trailer's Key A field must be replaced, never copied.
-                //
-                // That field holds six zero bytes on any card that hides Key A,
-                // which is the usual case — the dump's own bytes are a
-                // placeholder, not the key. Writing them verbatim would give the
-                // clone Key A = 000000000000 while the original uses something
-                // else, and a lock checking Key A would then reject the clone.
-                // The value that is actually known to work is `key_a`, which was
-                // confirmed by authenticating, so that is what goes in.
-                //
-                // When Key A could not be determined at all (the sector was
-                // opened with Key B), the trailer cannot be reproduced: skipping
-                // it leaves the target's own keys and access bits intact rather
-                // than programming a placeholder the original does not have.
-                let Some(trailer) = prepare_trailer(&trailer, dump_sector.key_a.as_deref()) else {
-                    // A deliberate skip, not an error: the sector's data blocks
-                    // were written, and only the keys could not be reproduced.
-                    blocks_skipped += 1;
-                    skips.push(format!(
-                        "扇区 {} 的尾块未写入：原卡不公开它的 Key A（MIFARE 规定不回读 Key A），\
-                         无法安全重建尾块，因此保留了目标卡自己的密钥与权限位。\
-                         该扇区的数据块已正常写入；若要连密钥一起复制，请在“读取卡片”页填入该扇区的 Key A 后重新备份",
-                        sector.index
-                    ));
-                    continue;
-                };
-                match self.write_block(target, trailer_block, &trailer) {
-                    Ok(true) => blocks_written += 1,
-                    Ok(false) => {
-                        blocks_failed += 1;
-                        failures.push(format!("扇区 {} 尾块写入未确认", sector.index));
-                    }
-                    Err(error) => return Err(error),
-                }
+            if sector.index == 0 {
+                manufacturer_keys = keys;
             }
-            sectors_written += 1;
+            if report.blocks_written > before_written && report.blocks_failed == before_failed {
+                report.sectors_written += 1;
+            }
         }
-
-        let verified = if options.verify {
-            self.verify_classic(target, dump, options, &selected, &opened_with)?
-        } else {
-            false
-        };
-
-        Ok(WriteReport {
-            uid: String::new(),
-            blocks_written,
-            blocks_failed,
-            blocks_skipped,
-            sectors_written,
-            verified,
-            manufacturer_block_written: manufacturer_result,
-            duration_ms: 0,
-            failures,
-            skips,
-            warnings: Vec::new(),
-        })
+        // UID changes last, after all ordinary sector operations.
+        if selected.iter().any(|sector| sector.index == 0) {
+            if !options.write_manufacturer_block {
+                report.manufacturer_block_written = Some(false);
+                report.skip("第 0 块：保留目标 UID / 厂商信息".into());
+            } else if report.blocks_failed > 0 || !report.verification_failures.is_empty() {
+                report.manufacturer_block_written = Some(false);
+                report.skip("第 0 块：前序写入或校验失败，保留目标 UID 便于重试".into());
+            } else if let Some(data) = dump.unit(0) {
+                if self
+                    .write_with_keys(target, 0, &data, &manufacturer_keys)?
+                    .is_some()
+                {
+                    report.blocks_written += 1;
+                    report.manufacturer_block_written = Some(true);
+                    target.uid = mifare::decode_hex(&dump.uid)?;
+                    target.sens_res = mifare::decode_hex(&dump.atqa)?
+                        .try_into()
+                        .expect("validated ATQA");
+                    target.sel_res = dump.sak;
+                    self.needs_reselect = true;
+                    if options.verify {
+                        if self.verify_data_block(target, 0, &data, &manufacturer_keys)? {
+                            report.blocks_verified += 1;
+                        } else {
+                            report
+                                .verification_failures
+                                .push("块 0：UID / 厂商信息校验失败".into());
+                        }
+                    }
+                } else {
+                    report.blocks_failed += 1;
+                    report.manufacturer_block_written = Some(false);
+                    report
+                        .failures
+                        .push("第 0 块写入被拒绝；普通卡和手机卡不能假定支持改 UID".into());
+                }
+            }
+        }
+        if !report.skips.is_empty() {
+            warnings.push("存在未复制区域；已写入块校验通过也不代表整卡一致".into());
+        }
+        report.verified = options.verify
+            && report.blocks_written > 0
+            && report.blocks_failed == 0
+            && report.blocks_verified == report.blocks_written
+            && report.verification_failures.is_empty();
+        Ok(report)
     }
 
-    /// Reads every written sector back and compares it against the dump.
-    ///
-    /// `opened_with` records the key that authenticated each sector during the
-    /// write. It matters when trailers are left alone: the card then still
-    /// carries its own keys, so the dump's Key A would fail and a sector that
-    /// was written correctly would be reported as unverifiable.
-    fn verify_classic(
+    /// Each attempted key starts a fresh authenticated operation. Failed writes
+    /// and reads may halt the PICC and must never poison subsequent blocks.
+    fn write_with_keys(
         &mut self,
         target: &mut PassiveTarget,
-        dump: &CardDump,
-        options: &WriteOptions,
-        selected: &[&mifare::Sector],
-        opened_with: &[(u8, [u8; KEY_BYTES], bool)],
-    ) -> Result<bool, String> {
-        let mut mismatches = 0_u32;
-        for sector in selected {
-            let Some(dump_sector) = dump
-                .sectors
-                .iter()
-                .find(|entry| entry.index == sector.index && entry.resolved)
-            else {
-                continue;
-            };
-            let trailer_block = sector.trailer_block() as u8;
-
-            let mut keys: Vec<([u8; KEY_BYTES], bool)> = Vec::new();
-            // Writing the trailer replaces the sector's keys with the dump's.
-            if options.write_trailers {
-                if let Some(key) = dump_sector
-                    .key_a
-                    .as_deref()
-                    .and_then(|text| mifare::parse_key(text).ok())
-                {
-                    keys.push((key, false));
-                }
-            }
-            // Otherwise the key that opened the sector for writing still does.
-            if let Some((_, key, key_b)) = opened_with
-                .iter()
-                .find(|(index, _, _)| *index == sector.index)
+        block: u8,
+        data: &[u8; 16],
+        keys: &[([u8; KEY_BYTES], bool)],
+    ) -> Result<Option<([u8; KEY_BYTES], bool)>, String> {
+        for (key, is_b) in keys {
+            if self.authenticate(target, block, key, *is_b)?
+                && self.write_block(target, block, data)?
             {
-                keys.push((*key, *key_b));
+                return Ok(Some((*key, *is_b)));
             }
+        }
+        Ok(None)
+    }
 
-            let mut opened = false;
-            for (key, key_b) in keys {
-                if self.authenticate(target, trailer_block, &key, key_b)? {
-                    opened = true;
-                    break;
-                }
-            }
-            if !opened {
-                // A sector that was written but cannot be re-opened is a
-                // verification failure, not a pass.
-                mismatches += 1;
-                continue;
-            }
-            for block in sector.blocks() {
-                let Some(expected) = dump.unit(block) else {
-                    continue;
-                };
-                if block == 0 && !options.write_manufacturer_block {
-                    continue;
-                }
-                match self.read_block(target, block as u8)? {
-                    Some(actual) if actual == expected => {}
-                    _ => mismatches += 1,
+    fn verify_data_block(
+        &mut self,
+        target: &mut PassiveTarget,
+        block: u8,
+        expected: &[u8; 16],
+        keys: &[([u8; KEY_BYTES], bool)],
+    ) -> Result<bool, String> {
+        for (key, is_b) in keys {
+            if self.authenticate(target, block, key, *is_b)? {
+                if let Some(actual) = self.read_block(target, block)? {
+                    return Ok(actual == *expected);
                 }
             }
         }
-        Ok(mismatches == 0)
+        Ok(false)
+    }
+
+    fn verify_trailer(
+        &mut self,
+        target: &mut PassiveTarget,
+        block: u8,
+        expected: &[u8; 16],
+    ) -> Result<bool, String> {
+        let bits = mifare::decode_access_bits(expected).ok_or("尾块权限无效")?;
+        let key_a = expected[..6].try_into().expect("Key A");
+        let key_b = expected[10..16].try_into().expect("Key B");
+        // Key A and protected Key B are masked on READ; authenticate instead.
+        if !self.authenticate(target, block, &key_a, false)? {
+            return Ok(false);
+        }
+        let mut actual = self.read_block(target, block)?;
+        if !bits.key_b_readable() {
+            if !self.authenticate(target, block, &key_b, true)? {
+                return Ok(false);
+            }
+            if actual.is_none() {
+                actual = self.read_block(target, block)?;
+            }
+        }
+        Ok(actual.is_some_and(|bytes| {
+            bytes[6..10] == expected[6..10]
+                && (!bits.key_b_readable() || bytes[10..16] == expected[10..16])
+        }))
     }
 
     fn write_ultralight(
         &mut self,
-        target: &PassiveTarget,
+        target: &mut PassiveTarget,
         dump: &CardDump,
+        options: &WriteOptions,
         warnings: &mut Vec<String>,
         progress: &mut impl FnMut(Progress),
     ) -> Result<WriteReport, String> {
-        let mut blocks_written = 0_u32;
-        let mut blocks_failed = 0_u32;
-        let mut failures = Vec::new();
-        let total = dump.units.len() as u32;
-
+        let layout = self.type2_layout(target)?;
+        if dump.units.len() != usize::from(layout.pages) {
+            return Err("Type 2 备份容量与目标不匹配；请先确认具体型号".into());
+        }
+        let mut report = WriteReport::empty();
+        warnings.push("仅写用户页；保留目标 UID、OTP、锁定位、配置和密码".into());
+        if !layout.identified {
+            warnings.push("型号未确认，本次仅允许写第 4–15 页".into());
+        }
         for unit in &dump.units {
-            let Some(hex) = unit.data.as_deref() else {
-                continue;
-            };
-            let Ok(bytes) = mifare::decode_hex(hex) else {
-                continue;
-            };
-            if bytes.len() != 4 {
-                continue;
-            }
-            // Pages 0-2 hold the UID and lock bytes. They are OTP on most tags,
-            // so a failed write there is expected rather than exceptional.
-            if unit.index < 3 {
-                warnings.push(format!(
-                    "第 {} 页属于 UID/锁定字段，多数标签为只读；写入结果以报告为准",
+            if unit.index < 4 || unit.index >= layout.user_end {
+                report.skip(format!(
+                    "第 {} 页：保留 UID / OTP / 锁定位 / 配置 / 密码",
                     unit.index
                 ));
+                continue;
             }
+            let Some(hex) = &unit.data else {
+                report.skip(format!("第 {} 页：备份缺失", unit.index));
+                continue;
+            };
+            let bytes = mifare::decode_hex(hex)?;
+            self.ensure_selected(target)?;
             progress(Progress {
                 phase: "write",
                 current: u32::from(unit.index),
-                total,
+                total: u32::from(layout.pages),
                 message: format!("写入第 {} 页", unit.index),
             });
-            let payload = [
-                0xA2,
-                unit.index as u8,
-                bytes[0],
-                bytes[1],
-                bytes[2],
-                bytes[3],
-            ];
+            let mut payload = vec![0xA2, unit.index as u8];
+            payload.extend(&bytes);
             let response = self.transact(
                 &pn532::in_data_exchange_command(target.target, &payload),
                 RF_TIMEOUT,
             )?;
             let (status, _) = pn532::parse_data_exchange(&response)?;
-            if status == 0x00 {
-                blocks_written += 1;
-            } else {
-                blocks_failed += 1;
-                if unit.index >= 3 {
-                    failures.push(format!(
-                        "第 {} 页写入失败：{}",
-                        unit.index,
-                        pn532::status_text(status)
-                    ));
+            if status != 0 {
+                self.needs_reselect = true;
+                report.blocks_failed += 1;
+                report.failures.push(format!(
+                    "第 {} 页：{}",
+                    unit.index,
+                    pn532::status_text(status)
+                ));
+                continue;
+            }
+            report.blocks_written += 1;
+            if options.verify {
+                let start = unit.index.min(layout.pages - 4);
+                let offset = usize::from(unit.index - start) * 4;
+                if self
+                    .read_block(target, start as u8)?
+                    .is_some_and(|data| data[offset..offset + 4] == bytes)
+                {
+                    report.blocks_verified += 1;
+                } else {
+                    report
+                        .verification_failures
+                        .push(format!("第 {} 页：回读校验失败", unit.index));
                 }
             }
         }
+        report.verified = options.verify
+            && report.blocks_written > 0
+            && report.blocks_failed == 0
+            && report.blocks_verified == report.blocks_written
+            && report.verification_failures.is_empty();
+        Ok(report)
+    }
+}
 
-        Ok(WriteReport {
+#[derive(Debug, Clone, Copy)]
+struct Type2Layout {
+    pages: u16,
+    user_end: u16,
+    identified: bool,
+}
+impl Type2Layout {
+    fn from_version(version: &[u8]) -> Option<Self> {
+        // NTAG213/215/216 data sheet Table 28 and memory maps.
+        if version.len() != 8 || version[..6] != [0, 4, 4, 2, 1, 0] || version[7] != 3 {
+            return None;
+        }
+        let user_end = match version[6] {
+            0x0F => 40,
+            0x11 => 130,
+            0x13 => 226,
+            _ => return None,
+        };
+        Some(Self {
+            pages: user_end + 5,
+            user_end,
+            identified: true,
+        })
+    }
+}
+
+impl WriteReport {
+    fn empty() -> Self {
+        Self {
             uid: String::new(),
-            blocks_written,
-            blocks_failed,
+            blocks_written: 0,
+            blocks_failed: 0,
             blocks_skipped: 0,
             sectors_written: 0,
             verified: false,
+            blocks_verified: 0,
+            verification_failures: Vec::new(),
+            uid_matches: false,
+            complete_copy: false,
             manufacturer_block_written: None,
             duration_ms: 0,
-            failures,
+            failures: Vec::new(),
             skips: Vec::new(),
             warnings: Vec::new(),
-        })
+        }
     }
+    fn skip(&mut self, message: String) {
+        self.blocks_skipped += 1;
+        self.skips.push(message);
+    }
+}
+
+fn validate_write_dump(dump: &CardDump, options: &WriteOptions) -> Result<(), String> {
+    let uid = mifare::decode_hex(&dump.uid)?;
+    if !matches!(uid.len(), 4 | 7)
+        || mifare::decode_hex(&dump.atqa)?.len() != 2
+        || CardKind::from_sak(dump.sak) != dump.kind
+    {
+        return Err("备份卡型、UID 或 ATQA 无效".into());
+    }
+    let sectors = mifare::sector_map(dump.kind);
+    let expected_size = if dump.kind.is_classic() { 16 } else { 4 };
+    if dump.unit_size != expected_size
+        || (!dump.kind.is_classic() && dump.kind != CardKind::Ultralight)
+    {
+        return Err("备份数据单位或卡型不支持".into());
+    }
+    let total = if dump.kind.is_classic() {
+        sectors
+            .iter()
+            .map(|sector| usize::from(sector.block_count))
+            .sum()
+    } else {
+        dump.units.len()
+    };
+    if total == 0 || total > 256 || dump.units.len() != total {
+        return Err("备份块数量与卡型不匹配".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for unit in &dump.units {
+        if usize::from(unit.index) >= total || !seen.insert(unit.index) {
+            return Err("备份含重复或越界块地址".into());
+        }
+        if let Some(hex) = &unit.data {
+            let bytes = mifare::decode_hex(hex)?;
+            if bytes.len() != usize::from(expected_size) {
+                return Err(format!("块 {} 数据长度错误", unit.index));
+            }
+            if dump.kind.is_classic()
+                && options.write_trailers
+                && is_trailer(&sectors, unit.index)
+                && (options.sectors.is_empty()
+                    || options
+                        .sectors
+                        .contains(&sector_of_block(&sectors, unit.index)))
+                && mifare::decode_access_bits(&bytes).is_none()
+            {
+                return Err(format!("块 {} 权限位校验失败，已在写入前中止", unit.index));
+            }
+        }
+    }
+    if dump.kind.is_classic() {
+        if dump.sectors.len() != sectors.len() {
+            return Err("备份扇区表不完整".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for entry in &dump.sectors {
+            let geometry = sectors
+                .iter()
+                .find(|sector| sector.index == entry.index)
+                .ok_or("扇区索引越界")?;
+            if !seen.insert(entry.index)
+                || entry.first_block != geometry.first_block
+                || entry.block_count != geometry.block_count
+                || entry.trailer_block != geometry.trailer_block()
+            {
+                return Err("备份扇区结构错误".into());
+            }
+            for key in [entry.key_a.as_deref(), entry.key_b.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                mifare::parse_key(key)?;
+            }
+        }
+    }
+    for sector in &options.sectors {
+        if !sectors.iter().any(|entry| entry.index == *sector) {
+            return Err("所选扇区超出卡片范围".into());
+        }
+    }
+    for key in &options.target_keys {
+        mifare::parse_key(key)?;
+    }
+    if let Some(uid) = &options.expected_target_uid {
+        if !matches!(mifare::decode_hex(uid)?.len(), 4 | 7) {
+            return Err("目标 UID 无效".into());
+        }
+    }
+    if options.write_manufacturer_block {
+        if !dump.kind.is_classic() || uid.len() != 4 {
+            return Err("改写 UID 仅支持 4 字节 UID 的 Classic 兼容可写厂商块卡".into());
+        }
+        let block = dump.unit(0).ok_or("备份缺少厂商块")?;
+        if mifare::manufacturer_bcc_is_valid(&block) != Some(true) || block[..4] != uid {
+            return Err("厂商块 UID / BCC 与备份不一致".into());
+        }
+    }
+    Ok(())
 }
 
 /// Candidate keys for one sector, in the order they are tried.
@@ -1721,6 +1845,7 @@ fn sector_key_candidates(
     }
     for key in extra_keys {
         push(*key, false, KeySource::Manual);
+        push(*key, true, KeySource::Manual);
     }
     for key in mifare::DEFAULT_KEYS {
         push(key, false, KeySource::Dictionary);
@@ -1730,36 +1855,37 @@ fn sector_key_candidates(
     }
     for (key, key_b) in confirmed {
         // A key confirmed as Key A may also be the sector's Key B.
-        if !*key_b {
-            push(*key, true, KeySource::Harvested);
-        }
+        push(*key, !*key_b, KeySource::Harvested);
     }
     candidates
 }
 
-/// Builds the sector trailer to programme into the clone, or `None` when it
-/// cannot be reproduced safely.
-///
-/// The trailer's first six bytes are its Key A field, and on any card that
-/// hides Key A those bytes read back as six zeros — they are a placeholder, not
-/// the key. Copying them verbatim would give the clone
-/// `Key A = 000000000000` while the original uses something else, so a lock
-/// that authenticates with Key A would reject the copy. The trustworthy value
-/// is the key that was *confirmed by authenticating* during the read, so that
-/// is what gets written.
-///
-/// If no Key A was ever confirmed (the sector was opened with Key B), there is
-/// nothing to substitute and no way to preserve the target's own key either —
-/// its trailer reads as zeros too. Returning `None` lets the caller skip the
-/// trailer and keep the target's keys rather than programming a placeholder.
+/// Reconstructs both hidden keys using known values. Readable Key B is copied
+/// as data; protected Key B must never be inferred from masked READ bytes.
 fn prepare_trailer(
     source: &[u8; mifare::BLOCK_BYTES],
     known_key_a: Option<&str>,
+    known_key_b: Option<&str>,
 ) -> Option<[u8; mifare::BLOCK_BYTES]> {
+    let bits = mifare::decode_access_bits(source)?;
     let key_a = mifare::parse_key(known_key_a?).ok()?;
     let mut trailer = *source;
     trailer[..KEY_BYTES].copy_from_slice(&key_a);
+    if !bits.key_b_readable() {
+        let key_b = mifare::parse_key(known_key_b?).ok()?;
+        trailer[10..16].copy_from_slice(&key_b);
+    }
     Some(trailer)
+}
+
+fn authentication_uid(uid: &[u8]) -> Result<[u8; 4], String> {
+    if !matches!(uid.len(), 4 | 7) {
+        return Err("MIFARE Classic 认证要求 4 或 7 字节 UID".into());
+    }
+    // MF1S50YYX_V1 §10.1.3: bytes from the last anticollision cascade.
+    Ok(uid[uid.len() - 4..]
+        .try_into()
+        .expect("validated UID length"))
 }
 
 fn describe_error_frame(code: Option<u8>) -> String {
@@ -1928,9 +2054,9 @@ mod tests {
         assert_eq!(recovered.0, [0xAA; 6]);
         assert!(recovered.1, "确认过的 Key A 也应作为 Key B 重试");
         assert_eq!(recovered.2, KeySource::Harvested);
-        // A key already confirmed as Key B is not re-offered as Key A.
+        // A confirmed Key B can also be a later sector's Key A.
         let candidates = sector_key_candidates(&[([0xAA; 6], true)], &[], None);
-        assert!(!candidates
+        assert!(candidates
             .iter()
             .any(|(key, key_b, source)| *key == [0xAA; 6]
                 && !*key_b
@@ -2000,6 +2126,17 @@ mod tests {
         assert!(detailed.contains("0x27"));
     }
 
+    fn hardware_test_path(path: &str) -> std::path::PathBuf {
+        let path = std::path::Path::new(path);
+        if path.is_absolute() {
+            return path.to_path_buf();
+        }
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join(path)
+    }
+
     /// End-to-end check against real hardware, ignored by default because it
     /// needs a reader and a card on a real port:
     ///
@@ -2031,114 +2168,296 @@ mod tests {
         );
         assert!(firmware.is_pn532(), "IC 字节不是 0x32");
 
-        let mut target = link
-            .scan(Instant::now() + Duration::from_secs(45))
-            .expect("未在 45 秒内找到卡片");
-        let uid = mifare::format_hex(&target.uid);
-        println!("UID = {uid}");
-
-        let kind = CardKind::from_sak(target.sel_res);
-        assert!(
-            kind.is_classic(),
-            "本测试只覆盖 MIFARE Classic，实际为 {kind:?}"
-        );
-        let sector_count = mifare::sector_map(kind).len();
-
+        let options = std::env::var("NFC_TEST_READ_OPTIONS")
+            .ok()
+            .map(|text| serde_json::from_str::<ReadOptions>(&text).expect("读取选项 JSON 无效"))
+            .unwrap_or_default();
         let dump = link
-            .read_classic(&mut target, kind, &ReadOptions::default(), &mut |_| {})
+            .read_card(&options, |progress| println!("{}", progress.message))
             .expect("读取失败");
-
         let read = dump.units.iter().filter(|unit| unit.data.is_some()).count();
-        let resolved = dump.sectors.iter().filter(|sector| sector.resolved).count();
         println!(
-            "读出 {read}/{} 块，{resolved}/{sector_count} 个扇区",
+            "卡型 {}，UID {}，ATQA {}，SAK {:02X}，读出 {}/{} 块",
+            dump.label,
+            dump.uid,
+            dump.atqa,
+            dump.sak,
+            read,
             dump.units.len()
+        );
+        println!(
+            "已知 Key A：{}，已知 Key B：{}",
+            dump.sectors
+                .iter()
+                .filter(|sector| sector.key_a.is_some())
+                .count(),
+            dump.sectors
+                .iter()
+                .filter(|sector| sector.key_b.is_some())
+                .count()
         );
         for warning in &dump.warnings {
             println!("提示: {warning}");
         }
-
-        // The whole point of the re-selection fix: a card whose keys are all
-        // present must read completely, not stop at the first hard sector.
-        assert!(resolved > 0, "没有任何扇区被攻克：话机或接线可能仍有问题");
-        assert_eq!(
-            read,
-            dump.units.len(),
-            "有块没读出来，说明扇区密钥或重选逻辑仍有问题"
-        );
+        if let Ok(path) = std::env::var("NFC_TEST_DUMP_PATH") {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let file = options
+                .open(hardware_test_path(&path))
+                .expect("无法新建备份文件（不会覆盖已有文件）");
+            serde_json::to_writer_pretty(file, &dump).expect("保存备份失败");
+            println!("备份已保存到 {path}");
+        }
+        assert!(read > 0, "已识别卡片，但所有扇区均需提供正确密钥");
+        if std::env::var("NFC_TEST_REQUIRE_COMPLETE").as_deref() == Ok("1") {
+            assert_eq!(read, dump.units.len(), "备份仍有缺失数据");
+            assert!(
+                dump.sectors
+                    .iter()
+                    .all(|sector| sector.key_a.is_some() && sector.key_b.is_some()),
+                "备份仍有未知密钥"
+            );
+        }
     }
 
-    /// Exercises `write_card` end to end against real hardware by writing a
-    /// card's own freshly-read dump back to it. Ignored by default:
-    ///
-    /// ```text
-    /// NFC_TEST_PORT=COM3 cargo test --lib -- --ignored --nocapture writes_a_real_card
-    /// ```
-    ///
-    /// Only idempotent for a target whose data and keys do not matter, such as
-    /// a phone's regenerated virtual card. It does rewrite sector trailers.
     #[test]
-    #[ignore = "需要真实读卡器与可写卡片：设置 NFC_TEST_PORT 后加 --ignored 运行"]
-    fn writes_a_real_card() {
-        let port_name = std::env::var("NFC_TEST_PORT").expect("请设置 NFC_TEST_PORT（例如 COM3）");
+    #[ignore = "需要 NFC_TEST_PORT；只读检查射频寻卡，不修改卡片"]
+    fn diagnoses_a_real_reader() {
+        let port_name = std::env::var("NFC_TEST_PORT").expect("请设置 NFC_TEST_PORT");
         let port = serialport::new(&port_name, BAUD_RATE)
-            .data_bits(DataBits::Eight)
-            .parity(Parity::None)
-            .stop_bits(StopBits::One)
-            .flow_control(FlowControl::None)
+            .timeout(PORT_TIMEOUT)
+            .open()
+            .unwrap();
+        let mut link = Link::new(port, Arc::new(AtomicBool::new(false)));
+        println!("Firmware: {:?}", link.wake_and_configure().unwrap());
+        link.transact(&[0x32, 5, 2, 1, 5], CONTROL_TIMEOUT).unwrap();
+        link.transact(&[0x32, 1, 1], CONTROL_TIMEOUT).unwrap();
+        println!(
+            "General status: {:02X?}",
+            link.transact(&[4], CONTROL_TIMEOUT).unwrap()
+        );
+        println!(
+            "RF registers (TxControl/TxAuto/RFCfg): {:02X?}",
+            link.transact(&[6, 0x63, 4, 0x63, 5, 0x63, 0x16], CONTROL_TIMEOUT)
+                .unwrap()
+        );
+        let mut found = 0;
+        for index in 0..10 {
+            let result = link.list_passive_target().unwrap();
+            println!("Scan {}: {:?}", index + 1, result);
+            if let Some(target) = result {
+                found += 1;
+                link.release_target(target.target);
+            }
+        }
+        link.transact(&[0x32, 5, 2, 1, 1], CONTROL_TIMEOUT).unwrap();
+        println!("Detected {found}/10 scans");
+    }
+
+    /// Reversible integration test for an explicitly selected blank replacement.
+    /// Saves the temporary data/keys before writing, attempts restoration even
+    /// after a write error, and compares the entire final dump with the baseline.
+    #[test]
+    #[ignore = "会写入并恢复指定空白目标卡；需要 NFC_TEST_TARGET_BACKUP、NFC_TEST_WRITE_UID、NFC_TEST_PATTERN_PATH"]
+    fn round_trips_a_blank_replacement_card() {
+        let port_name = std::env::var("NFC_TEST_PORT").expect("请设置 NFC_TEST_PORT");
+        let expected_uid = std::env::var("NFC_TEST_WRITE_UID").expect("请指定目标 UID");
+        let backup_path =
+            std::env::var("NFC_TEST_TARGET_BACKUP").expect("请提供已确认的空白目标卡备份");
+        let pattern_path = std::env::var("NFC_TEST_PATTERN_PATH").expect("请指定测试数据备份路径");
+        let baseline: CardDump = serde_json::from_reader(
+            std::fs::File::open(hardware_test_path(&backup_path)).expect("目标备份不存在"),
+        )
+        .expect("目标备份格式无效");
+        assert!(
+            baseline.uid.eq_ignore_ascii_case(&expected_uid),
+            "备份不是指定目标"
+        );
+        assert_eq!(
+            baseline.kind,
+            CardKind::Classic1K,
+            "此测试只针对 Classic 1K 空白目标"
+        );
+        let mut options: WriteOptions = serde_json::from_str(
+            r#"{"writeManufacturerBlock":false,"allowSameUid":true,"writeTrailers":true,"verify":true}"#,
+        ).unwrap();
+        options.expected_target_uid = Some(expected_uid.clone());
+        validate_write_dump(&baseline, &options).expect("目标备份无效");
+        assert!(
+            baseline.units.iter().all(|unit| unit.data.is_some()),
+            "目标备份不完整"
+        );
+        assert!(
+            baseline
+                .units
+                .iter()
+                .filter(|unit| !unit.is_trailer && unit.index != 0)
+                .all(|unit| unit.data.as_deref() == Some("00000000000000000000000000000000")),
+            "此测试只允许已备份的空白卡"
+        );
+        assert!(
+            baseline.sectors.iter().all(|sector| {
+                sector.key_a.as_deref() == Some("FFFFFFFFFFFF")
+                    && sector.key_b.as_deref() == Some("FFFFFFFFFFFF")
+                    && baseline
+                        .unit(sector.trailer_block)
+                        .is_some_and(|bytes| bytes[6..9] == [0xFF, 7, 0x80])
+            }),
+            "此测试要求目标仍为出厂密钥和传输权限"
+        );
+        let port = serialport::new(&port_name, BAUD_RATE)
+            .timeout(PORT_TIMEOUT)
+            .open()
+            .expect("无法打开串口");
+        let mut link = Link::new(port, Arc::new(AtomicBool::new(false)));
+        link.wake_and_configure().expect("握手失败");
+        let before = link
+            .read_card(&ReadOptions::default(), |_| {})
+            .expect("测试前读取失败");
+        assert_card_contents_equal(&baseline, &before);
+
+        let mut pattern = baseline.clone();
+        for unit in &mut pattern.units {
+            if unit.index != 0 && !unit.is_trailer {
+                let mut bytes = *b"WL1 NFC TEST----";
+                bytes[12] = unit.index as u8;
+                bytes[13] = !bytes[12];
+                bytes[14] = 0x5A;
+                bytes[15] = 0xA5;
+                unit.data = Some(mifare::format_hex(&bytes));
+            }
+        }
+        // Change one Key A and the readable Key B data, preserving all access
+        // bits. This exercises real trailer reconstruction and reauthentication.
+        let probe_a = "A1B2C3D4E5F6";
+        let probe_b = "102030405060";
+        pattern.sectors[15].key_a = Some(probe_a.into());
+        pattern.sectors[15].key_b = Some(probe_b.into());
+        let mut trailer = pattern.unit(63).unwrap();
+        trailer[10..].copy_from_slice(&mifare::parse_key(probe_b).unwrap());
+        pattern.units[63].data = Some(mifare::format_hex(&trailer));
+        let mut file_options = std::fs::OpenOptions::new();
+        file_options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            file_options.mode(0o600);
+        }
+        let file = file_options
+            .open(hardware_test_path(&pattern_path))
+            .expect("无法保存测试数据（不会覆盖已有文件）");
+        serde_json::to_writer_pretty(file, &pattern).expect("测试数据备份失败");
+        println!("目标已确认，测试数据与恢复密钥已保存；开始写入 47 个数据块和 16 个尾块");
+        let exercise = link.write_card(&pattern, &options, |progress| {
+            println!("测试：{}", progress.message)
+        });
+        println!("TEST_REPORT: {}", serde_json::to_string(&exercise).unwrap());
+        // Never assert on the write result before restoring the card.
+        options.target_keys = vec![probe_a.into(), "FFFFFFFFFFFF".into()];
+        let restore = link.write_card(&baseline, &options, |progress| {
+            println!("恢复：{}", progress.message)
+        });
+        println!(
+            "RESTORE_REPORT: {}",
+            serde_json::to_string(&restore).unwrap()
+        );
+        let after = link.read_card(&ReadOptions::default(), |_| {});
+        let restore =
+            restore.expect("恢复失败；使用保留的目标备份与测试 Key A 恢复，不要把测试数据用于门禁");
+        assert!(restore.verified, "恢复后仍有块未通过校验");
+        assert_eq!(restore.blocks_written, 63);
+        assert_card_contents_equal(&baseline, &after.expect("恢复后整卡读取失败"));
+        println!("RESTORED: 64/64 块、全部扇区密钥和 UID 与测试前一致");
+        let exercise = exercise.expect("写入试验失败（空白卡已经恢复）");
+        assert!(exercise.verified, "测试数据或密钥未全部写入并通过校验");
+        assert_eq!(exercise.blocks_written, 63);
+        assert_eq!(exercise.blocks_verified, 63);
+        assert_eq!(exercise.blocks_failed, 0);
+    }
+
+    fn assert_card_contents_equal(expected: &CardDump, actual: &CardDump) {
+        assert_eq!(actual.uid, expected.uid, "目标 UID 发生变化");
+        assert_eq!(actual.atqa, expected.atqa);
+        assert_eq!(actual.sak, expected.sak);
+        assert_eq!(actual.kind, expected.kind);
+        assert_eq!(actual.units.len(), expected.units.len());
+        for unit in &expected.units {
+            assert_eq!(
+                actual.unit(unit.index),
+                expected.unit(unit.index),
+                "块 {} 与备份不同",
+                unit.index
+            );
+        }
+        assert_eq!(actual.sectors.len(), expected.sectors.len());
+        for sector in &expected.sectors {
+            let actual = actual
+                .sectors
+                .iter()
+                .find(|entry| entry.index == sector.index)
+                .expect("缺少扇区");
+            assert_eq!(
+                actual.key_a, sector.key_a,
+                "扇区 {} Key A 不同",
+                sector.index
+            );
+            assert_eq!(
+                actual.key_b, sector.key_b,
+                "扇区 {} Key B 不同",
+                sector.index
+            );
+        }
+    }
+
+    /// Explicit replacement-card test. Never reads a card and writes its own
+    /// dump back implicitly: the operator supplies a saved source and target UID.
+    #[test]
+    #[ignore = "需要原卡备份 NFC_TEST_SOURCE_PATH 与目标 NFC_TEST_WRITE_UID；会写入目标卡"]
+    fn writes_a_real_card() {
+        let port_name = std::env::var("NFC_TEST_PORT").expect("请设置 NFC_TEST_PORT");
+        let path = std::env::var("NFC_TEST_SOURCE_PATH").expect("请设置原卡备份路径");
+        let expected_uid = std::env::var("NFC_TEST_WRITE_UID").expect("请明确设置待写目标 UID");
+        let dump: CardDump = serde_json::from_reader(
+            std::fs::File::open(hardware_test_path(&path)).expect("备份不存在"),
+        )
+        .expect("备份格式错误");
+        let mut options: WriteOptions = serde_json::from_str(
+            &std::env::var("NFC_TEST_WRITE_OPTIONS").unwrap_or_else(|_| "{}".into()),
+        )
+        .expect("写入选项无效");
+        options.expected_target_uid = Some(expected_uid.clone());
+        validate_write_dump(&dump, &options).expect("备份不可写入");
+        let port = serialport::new(&port_name, BAUD_RATE)
             .timeout(PORT_TIMEOUT)
             .open()
             .expect("无法打开串口");
         let mut link = Link::new(port, Arc::new(AtomicBool::new(false)));
         link.wake_and_configure().expect("PN532 握手失败");
-
-        let mut target = link
+        let target = link
             .scan(Instant::now() + Duration::from_secs(30))
-            .expect("未找到卡片");
-        let kind = CardKind::from_sak(target.sel_res);
-        println!("目标 UID = {}", mifare::format_hex(&target.uid));
-
-        let dump = link
-            .read_classic(&mut target, kind, &ReadOptions::default(), &mut |_| {})
-            .expect("读取失败");
-        println!(
-            "读出 {}/{} 块，{} 个扇区已攻克",
-            dump.units.iter().filter(|u| u.data.is_some()).count(),
-            dump.units.len(),
-            dump.sectors.iter().filter(|s| s.resolved).count()
+            .expect("未找到目标卡");
+        assert!(
+            mifare::format_hex(&target.uid).eq_ignore_ascii_case(&expected_uid),
+            "当前卡不是指定目标"
         );
-
-        // A fresh scan: the read left the card released. These are the same
-        // defaults the frontend sends.
-        let options = WriteOptions {
-            write_manufacturer_block: false,
-            write_trailers: true,
-            verify: true,
-            sectors: Vec::new(),
-            target_keys: Vec::new(),
-        };
+        // Keep the expected identity pinned through the second activation.
+        link.release_target(target.target);
+        let actual = link
+            .scan(Instant::now() + Duration::from_secs(2))
+            .expect("目标卡离场");
+        assert_eq!(actual.uid, target.uid);
         let report = link
-            .write_card(&dump, &options, &mut |_| {})
-            .expect("写入过程本身报错");
-
-        println!(
-            "写入 {} 块，失败 {} 块，{} 个扇区，回读校验 {}",
-            report.blocks_written,
-            report.blocks_failed,
-            report.sectors_written,
-            if report.verified {
-                "通过"
-            } else {
-                "未通过"
-            }
-        );
-        for warning in &report.warnings {
-            println!("提示: {warning}");
-        }
-        for failure in &report.failures {
-            println!("失败项: {failure}");
-        }
-        assert!(report.blocks_written > 0, "一个块都没写进去");
+            .write_card(&dump, &options, |progress| println!("{}", progress.message))
+            .expect("写入失败");
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        assert!(report.blocks_written > 0, "没有块写入成功");
+        assert_eq!(report.blocks_failed, 0);
+        assert!(report.verified, "已写块未全部通过验证");
     }
 
     #[test]
@@ -2149,7 +2468,7 @@ mod tests {
         source[6..10].copy_from_slice(&[0xFF, 0x07, 0x80, 0x69]);
         source[10..16].copy_from_slice(&[0xFF; 6]);
 
-        let trailer = prepare_trailer(&source, Some("FFFFFFFFFFFF")).unwrap();
+        let trailer = prepare_trailer(&source, Some("FFFFFFFFFFFF"), None).unwrap();
         assert_eq!(&trailer[..6], &[0xFF; 6], "必须写入已确认的 Key A");
         assert_ne!(&trailer[..6], &[0x00; 6], "绝不能写入占位零字节");
         // Everything after Key A is copied through unchanged.
@@ -2165,7 +2484,7 @@ mod tests {
         source[6..10].copy_from_slice(&[0xFF, 0x07, 0x80, 0x69]);
         source[10..16].copy_from_slice(&[0xFF; 6]);
 
-        let trailer = prepare_trailer(&source, Some("000000000000")).unwrap();
+        let trailer = prepare_trailer(&source, Some("000000000000"), None).unwrap();
         assert_eq!(&trailer[..6], &[0x00; 6]);
         assert_eq!(&trailer[10..16], &[0xFF; 6], "Key B 应原样保留");
     }
@@ -2173,10 +2492,10 @@ mod tests {
     #[test]
     fn an_unknown_key_a_refuses_to_produce_a_trailer() {
         let source = [0_u8; 16];
-        assert!(prepare_trailer(&source, None).is_none());
+        assert!(prepare_trailer(&source, None, None).is_none());
         // A malformed key is as unusable as a missing one.
-        assert!(prepare_trailer(&source, Some("ZZZZ")).is_none());
-        assert!(prepare_trailer(&source, Some("")).is_none());
+        assert!(prepare_trailer(&source, Some("ZZZZ"), None).is_none());
+        assert!(prepare_trailer(&source, Some(""), None).is_none());
     }
 
     #[test]
@@ -2306,3 +2625,7 @@ mod tests {
         assert!(info.detail.unwrap().contains("NTAG"));
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "nfc_protocol_tests.rs"]
+mod protocol_tests;

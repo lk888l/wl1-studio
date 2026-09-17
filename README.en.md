@@ -132,6 +132,7 @@ The supporting guides are currently written in Simplified Chinese:
 - [System architecture](docs/architecture.md)
 - [Firmware integration](docs/firmware-integration.md)
 - [GameBox integration](docs/gamebox-integration.md)
+- [PN532 NFC card backup and writing](docs/nfc-pn532.md)
 - [Ubuntu 24.04 guide](docs/linux.md)
 - [Development guide](docs/development.md)
 - [Release guide](docs/release.md)

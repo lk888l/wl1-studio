@@ -8,6 +8,9 @@ import {
   formatUid,
   hexPairs,
   hexToAscii,
+  parseCardDump,
+  missingKeySectors,
+  readSummary,
   type CardDump,
   type DataUnit,
 } from "./nfc";
@@ -68,9 +71,9 @@ describe("hex helpers", () => {
 
 describe("dump completeness", () => {
   it("counts every unit the reader could not open", () => {
-    expect(dumpGaps(dump([unit(0, "00".repeat(16)), unit(1, "11".repeat(16))]))).toBe(0);
-    expect(dumpGaps(dump([unit(0, "00".repeat(16)), unit(1), unit(2)]))).toBe(2);
-    expect(dumpGaps(dump([]))).toBe(0);
+    expect(dumpGaps(dump([unit(0, "00".repeat(16)), unit(1, "11".repeat(16))]))).toBe(62);
+    expect(dumpGaps(dump([unit(0, "00".repeat(16)), unit(1), unit(2)]))).toBe(63);
+    expect(dumpGaps(dump([]))).toBe(64);
   });
 });
 
@@ -94,5 +97,46 @@ describe("option defaults", () => {
     const first = emptyReadOptions();
     first.extraKeys.push("FFFFFFFFFFFF");
     expect(emptyReadOptions().extraKeys).toEqual([]);
+  });
+});
+
+function fullDump(): CardDump {
+  const result = dump(Array.from({ length: 64 }, (_, index) => unit(index, "00".repeat(16))));
+  result.sectors = Array.from({ length: 16 }, (_, index) => ({
+    index, firstBlock: index * 4, blockCount: 4, trailerBlock: index * 4 + 3,
+    keyA: "FFFFFFFFFFFF", keyB: "FFFFFFFFFFFF", keySource: "dictionary", resolved: true,
+  }));
+  return result;
+}
+
+describe("backup imports and completeness", () => {
+  it("imports a complete backup and reports missing keys independently from readable blocks", () => {
+    const source = fullDump();
+    source.sectors[0]!.keyB = undefined;
+    const imported = parseCardDump(JSON.stringify(source));
+    expect(dumpGaps(imported)).toBe(0);
+    expect(missingKeySectors(imported).map((sector) => sector.index)).toEqual([0]);
+    expect(readSummary(imported)).toContain("尚不具备完整复制条件");
+  });
+  it("accepts native nullable data while rejecting truncated or duplicate addresses", () => {
+    const source = fullDump();
+    const native = JSON.stringify(source).replace('"data":"' + "00".repeat(16) + '"', '"data":null');
+    expect(dumpGaps(parseCardDump(native))).toBe(1);
+    source.units.pop();
+    expect(() => parseCardDump(JSON.stringify(source))).toThrow();
+    const duplicate = fullDump(); duplicate.units[63]!.index = 0;
+    expect(() => parseCardDump(JSON.stringify(duplicate))).toThrow();
+  });
+  it("rejects invalid hex, sector geometry, and absent arrays before rendering", () => {
+    for (const mutate of [
+      (d: CardDump) => { d.units[2]!.data = "中".repeat(16); },
+      (d: CardDump) => { d.sectors[0]!.trailerBlock = 7; },
+      (d: CardDump) => { d.sectors[0]!.keyA = "unknown"; },
+      (d: CardDump) => { d.unitSize = 4; },
+    ]) {
+      const source = fullDump(); mutate(source);
+      expect(() => parseCardDump(JSON.stringify(source))).toThrow();
+    }
+    expect(() => parseCardDump('{"uid":"12345678","units":[]}')).toThrow();
   });
 });
