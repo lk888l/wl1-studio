@@ -4,6 +4,7 @@ export type PageId =
   | "tuning"
   | "control"
   | "calibration"
+  | "firmware"
   | "diagnostics";
 
 export type ConnectionMode = "disconnected" | "mock" | "serial";

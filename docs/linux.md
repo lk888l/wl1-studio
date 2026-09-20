@@ -64,6 +64,10 @@ id -nG
 
 受管设备部署若必须使用 udev，应按已经核实的 VID/PID 精确匹配，并使用 `TAG+="uaccess"` 或专用组。不要从文档示例猜测设备标识。
 
+## ST-Link USB 权限
+
+WL1 的 ST-Link/SWD 烧录不走串口，`dialout` 权限并不代替 ST-Link USB 权限。可在 **WL1 → 固件与 Flash → USB 驱动与权限设置** 中手动设置内置规则，系统通过 pkexec 请求管理员授权；操作后重新插拔 ST-Link。该规则只匹配 ST-Link 并通过 `uaccess` 授权活动桌面用户，应用无需 root。无桌面授权代理或受管系统需管理员预配置，详见 [WL1 固件指南](wl1-firmware.md)。
+
 ## Wayland 与 X11
 
 Ubuntu 24.04 默认 Wayland，WebKitGTK/Tauri 可直接运行。若特定显卡驱动下出现空白窗口，先更新系统 WebKitGTK 与显卡驱动并收集日志；临时诊断可尝试：

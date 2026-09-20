@@ -1,0 +1,3 @@
+# WL1 Studio: ST-Link only; grant access to the active local desktop session.
+# This file must sort before 73-seat-late.rules for TAG+="uaccess" to take effect.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="3748|374a|374b|3742|3752|374e|374f|3753|3754|3757", TAG+="uaccess"

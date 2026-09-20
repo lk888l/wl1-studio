@@ -46,6 +46,13 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
       - name: Show Rust toolchain
         run: rustup show active-toolchain
+      - name: Verify bundled ST-Link scripts and driver (no installation)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/check-stlink-windows.ps1
+      - name: Check Linux ST-Link setup syntax (no installation)
+        if: runner.os == 'Linux'
+        run: sh -n src-tauri/resources/stlink/install-linux.sh
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check

@@ -1,0 +1,64 @@
+.wl1-firmware { --fw-border: var(--line); }
+.wl1-fw-badge { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 12px; color: var(--accent-deep); background: var(--accent-soft); font-size: 12px; }
+.wl1-fw-warning { display: flex; align-items: flex-start; gap: 12px; padding: 15px 18px; border: 1px solid #e9cda8; border-radius: 16px; background: #fff7e9; color: #81541b; font-size: 12px; line-height: 1.8; }
+.wl1-fw-warning svg { flex-shrink: 0; margin-top: 2px; }
+.wl1-fw-card { min-width: 0; padding: 20px; }
+.wl1-fw-card > header { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.wl1-fw-card > header > svg { color: var(--accent-deep); }
+.wl1-fw-card > header > h2 { flex: 1; font-size: 16px; }
+.wl1-fw-card > header > span { color: var(--muted); font: 12px Consolas, monospace; }
+.wl1-fw-card p { font-size: 12px; line-height: 1.8; }
+.wl1-fw-fields { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(180px, 1fr) 120px; align-items: end; gap: 14px; margin: 0; padding: 0; border: 0; }
+.wl1-fw-fields label, .wl1-fw-address, .wl1-fw-dialog label { display: grid; gap: 7px; font-size: 12px; color: var(--muted); }
+.wl1-firmware input:not([type="checkbox"]):not([type="file"]), .wl1-firmware select, .wl1-fw-dialog input { min-width: 0; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--glass-strong); }
+.wl1-fw-fields .wl1-fw-checkbox { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.wl1-fw-checkbox small { margin-left: 10px; color: var(--muted); }
+.wl1-fw-hint { margin: 12px 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.wl1-fw-support { padding-top: 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.wl1-firmware summary { cursor: pointer; color: var(--accent-deep); }
+.wl1-fw-support p { margin: 12px 0; }
+.wl1-fw-support details { margin-top: 12px; }
+.wl1-fw-support pre { max-height: 250px; overflow: auto; white-space: pre-wrap; font-size: 10px; }
+.wl1-fw-operations { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.wl1-fw-flash { grid-row: span 2; }
+.wl1-fw-file { position: relative; display: grid; justify-items: center; gap: 9px; min-height: 135px; padding: 20px; border: 1px dashed var(--accent); border-radius: 15px; background: color-mix(in srgb, var(--accent-soft) 40%, transparent); text-align: center; overflow-wrap: anywhere; }
+.wl1-fw-file svg { color: var(--accent-deep); }
+.wl1-fw-file span { color: var(--muted); font-size: 11px; }
+.wl1-fw-file input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+.wl1-fw-file:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.wl1-fw-address { margin-top: 16px; }
+.wl1-fw-address small { line-height: 1.7; }
+.wl1-fw-image { display: grid; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 11px; }
+.wl1-fw-image code { display: block; overflow-wrap: anywhere; color: var(--muted); font-size: 10px; line-height: 1.8; }
+.wl1-fw-image details { max-height: 180px; overflow: auto; }
+.wl1-fw-operations article > button, .wl1-fw-operations section > button { width: 100%; justify-content: center; }
+.wl1-fw-erase > header > svg { color: #c45a46; }
+.wl1-fw-notice { padding: 12px 15px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-deep); font-size: 12px; line-height: 1.7; }
+.wl1-fw-error { color: #b84235; overflow-wrap: anywhere; }
+.wl1-fw-progress p { overflow-wrap: anywhere; }
+.wl1-fw-progress progress { width: 100%; height: 10px; margin-top: 14px; accent-color: var(--accent); }
+.wl1-fw-progress small { display: block; margin-top: 10px; color: var(--muted); }
+.wl1-fw-chip { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 14px; font-size: 11px; color: var(--muted); }
+.wl1-fw-empty { display: grid; justify-items: center; gap: 12px; padding: 40px 10px; color: var(--muted); }
+.wl1-fw-empty span { font: 11px Consolas, monospace; }
+.wl1-fw-digest { display: block; margin: 10px 0; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.wl1-fw-pager, .wl1-fw-pager > div, .wl1-fw-pager form { display: flex; gap: 10px; align-items: center; }
+.wl1-fw-pager { justify-content: space-between; margin: 16px 0; font-size: 12px; }
+.wl1-fw-pager label { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.wl1-fw-pager input { max-width: 170px; font-family: Consolas, monospace; }
+.wl1-fw-hex { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.wl1-fw-hex table { width: 100%; border-collapse: collapse; font: 12px/1.8 "SFMono-Regular", Consolas, "Liberation Mono", monospace; text-align: left; white-space: pre; }
+.wl1-fw-hex th, .wl1-fw-hex td { padding: 4px 14px; }
+.wl1-fw-hex thead { background: var(--accent-soft); color: var(--accent-deep); }
+.wl1-fw-hex tbody th { color: var(--muted); font-weight: 400; }
+.wl1-fw-hex tr:nth-child(even) { background: rgba(255,255,255,.45); }
+.wl1-fw-hex td:last-child { color: var(--muted); }
+.wl1-fw-dialog { width: min(520px, calc(100vw - 40px)); padding: 26px; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: #f7faff; box-shadow: var(--shadow); }
+.wl1-fw-dialog::backdrop { background: rgba(20,35,60,.42); backdrop-filter: blur(4px); }
+.wl1-fw-dialog h2 { margin-bottom: 18px; font-size: 20px; }
+.wl1-fw-dialog p { margin: 12px 0; font-size: 13px; line-height: 1.8; }
+.wl1-fw-dialog code { display: block; margin: 10px 0; overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }
+.wl1-fw-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.wl1-fw-confirm-ranges { max-height: 120px; overflow: auto; }
+@media (max-width: 1200px) { .wl1-fw-fields { grid-template-columns: 1fr 1fr; } .wl1-fw-probe { grid-column: 1 / -1; } .wl1-fw-hex table { font-size: 11px; } }
+@media (max-width: 800px) { .wl1-fw-operations { grid-template-columns: 1fr; } .wl1-fw-pager { flex-wrap: wrap; } }

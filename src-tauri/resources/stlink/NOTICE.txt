@@ -1,0 +1,26 @@
+ST-Link offline USB support bundled with WL1 Studio
+
+stsw-link009.zip is an UNMODIFIED STMicroelectronics STSW-LINK009 driver
+distribution. Debug INF: DriverVer=04/01/2021,2.02; catalogs: March 2022.
+Copyright STMicroelectronics and its licensors. The archive also contains
+Microsoft co-installers; their original embedded notices remain unchanged.
+These third-party binaries are NOT covered by WL1 Studio's MIT license.
+Use only with STMicroelectronics microcontrollers/microprocessors; see the
+accompanying SLA0048.txt. No endorsement by STMicroelectronics is implied.
+
+Product: https://www.st.com/en/development-tools/stsw-link009.html
+License identified by ST product data brief:
+https://www.st.com/resource/en/data_brief/stsw-link009.pdf
+License text: https://wiki.st.com/stm32mpu/wiki/SLA0048_license_-_Rev4
+Original archive retrieved 2026-09-20 from ST's official community attachment:
+https://community.st.com/topic/trackAttachment?file_uuid=6a4a63e8-6ed8-9a75-9771-2fb58d5226f3&redirect=1
+SHA-256: df015c7760f974e9da0f4c5a098d62c72157ea45cd0e80694eb47ab7ef28352b
+
+WL1 Studio embeds the archive only in Windows x64 builds. Installation is an
+explicit user action requiring Windows UAC; PnPUtil installs only the original
+stlink_dbg_winusb.inf. No installation runs at build, startup or app install.
+VCP/bridge INFs and the archive's legacy setup executables are not executed.
+Windows ARM64 driver installation is not provided by this package.
+
+Linux builds embed a ST-Link-specific uaccess rule, installed only on explicit
+request through system authorization (pkexec). Linux needs no bundled driver.

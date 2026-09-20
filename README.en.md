@@ -40,6 +40,10 @@ The current compatibility scope has two layers: the committed HEAD baseline and 
 
 See the [Firmware Integration Guide](docs/firmware-integration.md) for the complete protocol boundary.
 
+## WL1 firmware and Flash
+
+WL1 also has a **Firmware & Flash** page with embedded probe-rs for STM32F411 over ST-Link/SWD: BIN/HEX/ELF/AXF programming with read-back verification, separate main-Flash erase, and full 256/512 KiB reads with hex/ASCII browsing and BIN backup. Windows x64 includes the original ST USB driver; Linux includes a narrowly scoped udev rule. USB setup is a manual in-app action with system administrator consent, never a startup/install hook. No external programmer CLI is needed. See the [firmware guide](docs/wl1-firmware.md) for safety and hardware validation limits.
+
 ## Motion workbench
 
 WL1 opens on one motion workbench with body pitch bias, leg height, all four PID groups, direction controls, and telemetry. The inline connection bar remembers the last serial port and selects a sole available port without connecting automatically. Numeric editors and sliders share parameter drafts; connecting preserves those drafts, while motion requires an explicitly chosen height and activation. Profiles and local geometry settings are available in an expandable section.

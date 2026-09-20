@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CalibrationPage } from "./components/pages/CalibrationPage";
 import { ControlPage } from "./components/pages/ControlPage";
 import { DiagnosticsPage } from "./components/pages/DiagnosticsPage";
+import { FirmwarePage } from "./components/pages/FirmwarePage";
 import { KinematicsPage } from "./components/pages/KinematicsPage";
 import { OverviewPage } from "./components/pages/OverviewPage";
 import { TuningPage } from "./components/pages/TuningPage";
@@ -61,6 +62,7 @@ const pageMeta: Record<PageId, { label: string }> = {
   control: { label: "实时控制" },
   calibration: { label: "标定向导" },
   diagnostics: { label: "诊断终端" },
+  firmware: { label: "固件与 Flash" },
 };
 
 const builtinProfiles: ParameterProfile[] = [
@@ -285,6 +287,8 @@ export default function App() {
 
 function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   const [page, setPage] = useState<PageId>("tuning");
+  const [firmwareVisited, setFirmwareVisited] = useState(false);
+  const [firmwareBusy, setFirmwareBusy] = useState(false);
   const [connection, setConnection] = useState<ConnectionSnapshot>(deviceGateway.connection);
   const [startupReady, setStartupReady] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -604,12 +608,14 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   }, [activeSessionId]);
 
   const navigate = useCallback((next: PageId): void => {
+    if (firmwareBusy) return;
     if (next !== page) parameterOperation.current += 1;
+    if (next === "firmware") setFirmwareVisited(true);
     setPage(next === "control" ? "tuning" : next);
-  }, [page]);
+  }, [page, firmwareBusy]);
 
   const returnToProductHome = useCallback((): void => {
-    if (connectionBusy) {
+    if (connectionBusy || firmwareBusy) {
       setConnectionError("当前设备操作尚未完成，请等待操作结束后再返回产品首页。");
       return;
     }
@@ -623,7 +629,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
     }
     parameterOperation.current += 1;
     onBack();
-  }, [connected, connectionBusy, onBack, startupReady]);
+  }, [connected, connectionBusy, firmwareBusy, onBack, startupReady]);
 
   const currentMeta = pageMeta[page];
   return (
@@ -650,7 +656,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
           </div>
         </header>
 
-        <ConnectionModal connection={connection} ports={ports} loading={connectionBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onConnect={(config) => void connect(config)} onDisconnect={() => void disconnect()} />
+        <ConnectionModal connection={connection} ports={ports} loading={connectionBusy || firmwareBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onConnect={(config) => { if (!firmwareBusy) void connect(config); }} onDisconnect={() => void disconnect()} />
 
         {startupError && (
           <section className="startup-danger-banner" role="alert">
@@ -672,6 +678,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
           )}
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
           {page === "kinematics" && <KinematicsPage />}
+          {firmwareVisited && <div hidden={page !== "firmware"}><FirmwarePage connected={connected} connectionBusy={connectionBusy || !startupReady} onBusyChange={setFirmwareBusy} /></div>}
           {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || connectionBusy} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
             <section className="workbench-telemetry glass-card" aria-label="实时反馈">
               <div className="workbench-telemetry__heading"><h2>实时反馈</h2><button className="text-button" type="button" disabled={!connected || connectionBusy || telemetryBusy || parameterSending} onClick={() => {

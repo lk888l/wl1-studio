@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod firmware;
+mod firmware_image;
+mod firmware_usb;
 mod gamebox;
 mod mifare;
 mod nfc;
@@ -44,7 +47,16 @@ pub fn run() {
         .manage(gamebox::GameBoxState::default())
         .manage(nfc::NfcState::default())
         .manage(commands::ProductSessionLifecycle::default())
+        .manage(firmware::FirmwareState::default())
         .invoke_handler(tauri::generate_handler![
+            firmware::firmware_status,
+            firmware::firmware_list_probes,
+            firmware::firmware_inspect,
+            firmware::firmware_read,
+            firmware::firmware_erase,
+            firmware::firmware_flash,
+            firmware_usb::firmware_usb_support,
+            firmware_usb::firmware_install_usb_support,
             commands::list_serial_ports,
             commands::connect_device,
             commands::disconnect_device,
@@ -66,6 +78,21 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
         .run(|app, event| {
+            // A normal close must not abort a flash sector halfway through.
+            // Force-killing the process or power loss cannot be prevented here.
+            if app.state::<firmware::FirmwareState>().snapshot().busy {
+                match &event {
+                    tauri::RunEvent::WindowEvent {
+                        event: tauri::WindowEvent::CloseRequested { api, .. },
+                        ..
+                    } => {
+                        api.prevent_close();
+                    }
+                    tauri::RunEvent::ExitRequested { api, .. } => api.prevent_exit(),
+                    _ => {}
+                }
+                return;
+            }
             if matches!(
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit

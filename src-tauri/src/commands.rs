@@ -73,12 +73,14 @@ fn ensure_serial_port_available(port_name: &str) -> Result<(), String> {
 #[tauri::command]
 pub fn connect_device(
     app: AppHandle,
+    firmware: State<'_, crate::firmware::FirmwareState>,
     state: State<'_, AppState>,
     gamebox: State<'_, GameBoxState>,
     lifecycle: State<'_, ProductSessionLifecycle>,
     config: SerialConfig,
 ) -> Result<ConnectionSnapshot, String> {
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
             gamebox.disconnect(None)?;
@@ -121,12 +123,14 @@ pub fn disconnect_device(
 #[tauri::command]
 pub fn gamebox_connect(
     app: AppHandle,
+    firmware: State<'_, crate::firmware::FirmwareState>,
     state: State<'_, AppState>,
     gamebox: State<'_, GameBoxState>,
     lifecycle: State<'_, ProductSessionLifecycle>,
     port_name: String,
 ) -> Result<GameBoxSnapshot, String> {
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    firmware.ensure_idle()?;
     let port_name = port_name.trim();
     if port_name.is_empty() {
         return Err("请选择游戏机串口".into());
@@ -157,6 +161,7 @@ pub fn gamebox_snapshot(gamebox: State<'_, GameBoxState>) -> Result<GameBoxSnaps
 #[tauri::command]
 pub fn nfc_connect(
     app: AppHandle,
+    firmware: State<'_, crate::firmware::FirmwareState>,
     state: State<'_, AppState>,
     nfc: State<'_, NfcState>,
     gamebox: State<'_, GameBoxState>,
@@ -164,6 +169,7 @@ pub fn nfc_connect(
     port_name: String,
 ) -> Result<NfcSnapshot, String> {
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    firmware.ensure_idle()?;
     let port_name = port_name.trim();
     if port_name.is_empty() {
         return Err("请选择读卡器串口".into());

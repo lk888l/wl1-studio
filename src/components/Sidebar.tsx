@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
+  Cpu,
   GitFork,
   Gauge,
   Radio,
@@ -18,6 +19,7 @@ const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
   { id: "kinematics", label: "腿部运动学", icon: GitFork },
   { id: "calibration", label: "标定向导", icon: WandSparkles },
   { id: "diagnostics", label: "诊断终端", icon: Stethoscope },
+  { id: "firmware", label: "固件与 Flash", icon: Cpu },
 ];
 
 interface SidebarProps {
