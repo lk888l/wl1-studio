@@ -165,11 +165,11 @@ export function ProductHome({
               <span className="product-card__body">
                 <span className="product-card__meta"><span className="product-available"><i />串口只读接入</span></span>
                 <span className="product-card__title"><strong>GameBox 游戏机</strong></span>
-                <span className="product-card__description">查看实体按键与串口日志，浏览游戏图鉴，为下一版固件做好准备。</span>
+                <span className="product-card__description">查看按键与串口日志，浏览游戏图鉴，通过 ST-Link 更新固件和备份 Flash。</span>
                 <span className="product-card__features">
                   <span><Gamepad2 size={15} />按键监视</span>
                   <span><Cable size={15} />串口日志</span>
-                  <span><FileCode2 size={15} />固件检查</span>
+                  <span><FileCode2 size={15} />烧录与备份</span>
                 </span>
                 <span className="product-card__action">
                   <strong>{launching === "gamebox" ? "正在打开工作台…"

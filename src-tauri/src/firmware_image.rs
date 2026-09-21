@@ -8,25 +8,61 @@ use sha2::{Digest, Sha256};
 pub const FLASH_START: u64 = 0x0800_0000;
 pub const MAX_FILE_SIZE: usize = 16 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Chip {
-    Stm32f411xc,
-    Stm32f411xe,
+    Stm32f411ceu,
+    Stm32f103c8t6,
 }
 
 impl Chip {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Stm32f411ceu => "STM32F411CEU",
+            Self::Stm32f103c8t6 => "STM32F103C8T6",
+        }
+    }
+
     pub fn size(self) -> usize {
         match self {
-            Self::Stm32f411xc => 256 * 1024,
-            Self::Stm32f411xe => 512 * 1024,
+            Self::Stm32f411ceu => 512 * 1024,
+            Self::Stm32f103c8t6 => 64 * 1024,
+        }
+    }
+
+    pub fn program_size(self) -> usize {
+        match self {
+            Self::Stm32f411ceu => self.size(),
+            // GameBox reserves the last two 1-KiB pages for persistent settings.
+            Self::Stm32f103c8t6 => 62 * 1024,
         }
     }
 
     pub fn target(self) -> &'static str {
         match self {
-            Self::Stm32f411xc => "STM32F411CC",
-            Self::Stm32f411xe => "STM32F411CE",
+            Self::Stm32f411ceu => "STM32F411CEUx",
+            Self::Stm32f103c8t6 => "STM32F103C8Tx",
+        }
+    }
+
+    pub fn device_id(self) -> u32 {
+        match self {
+            Self::Stm32f411ceu => 0x431,
+            Self::Stm32f103c8t6 => 0x410,
+        }
+    }
+
+    pub fn size_register(self) -> u64 {
+        match self {
+            Self::Stm32f411ceu => 0x1fff_7a22,
+            Self::Stm32f103c8t6 => 0x1fff_f7e0,
+        }
+    }
+
+    pub fn uid_register(self) -> u64 {
+        match self {
+            Self::Stm32f411ceu => 0x1fff_7a10,
+            Self::Stm32f103c8t6 => 0x1fff_f7e8,
         }
     }
 }
@@ -77,8 +113,13 @@ fn validate_range(address: u64, length: usize, chip: Chip) -> Result<(), String>
     let end = address.checked_add(length as u64).ok_or("固件地址溢出")?;
     if address < FLASH_START || end > FLASH_START + chip.size() as u64 {
         return Err(format!(
-            "固件范围 {address:#010X}..{end:#010X} 超出所选芯片主 Flash；不允许写入 RAM、OTP 或选项字节"
+            "固件范围 {address:#010X}..{end:#010X} 超出产品目标芯片主 Flash；不允许写入 RAM、OTP 或选项字节"
         ));
+    }
+    if end > FLASH_START + chip.program_size() as u64 {
+        return Err(
+            "固件覆盖游戏机设置保留区 0x0800F800–0x0800FFFF；更新只能写入前 62 KiB 应用区".into(),
+        );
     }
     Ok(())
 }
@@ -199,24 +240,55 @@ mod tests {
             format,
             data,
             base_address,
-            chip: Chip::Stm32f411xc,
+            chip: Chip::Stm32f411ceu,
         }
     }
 
     #[test]
-    fn bin_bounds_use_selected_capacity_and_checked_arithmetic() {
-        let mut image = request(ImageFormat::Bin, vec![0x5a; 256 * 1024], FLASH_START);
+    fn bin_bounds_use_product_capacity_and_checked_arithmetic() {
+        let mut image = request(ImageFormat::Bin, vec![0x5a; 512 * 1024], FLASH_START);
         assert!(prepare_image(&image).is_ok());
         image.data.push(0);
         assert!(prepare_image(&image).is_err());
-        image.chip = Chip::Stm32f411xe;
-        assert!(prepare_image(&image).is_ok());
         image.base_address = u64::MAX;
         assert!(prepare_image(&image).is_err());
         image.base_address = 0x1fff_7800;
         assert!(prepare_image(&image).is_err());
         image.base_address = 0x2000_0000;
         assert!(prepare_image(&image).is_err());
+    }
+
+    #[test]
+    fn gamebox_bin_preserves_settings_and_rejects_full_flash_backups_as_updates() {
+        let mut image = request(ImageFormat::Bin, vec![0x5a; 62 * 1024], FLASH_START);
+        image.chip = Chip::Stm32f103c8t6;
+        assert!(prepare_image(&image).is_ok());
+        image.data.push(0);
+        assert!(prepare_image(&image).err().unwrap().contains("设置保留区"));
+        image.data = vec![0xff; 64 * 1024];
+        assert!(prepare_image(&image).err().unwrap().contains("设置保留区"));
+        image.data = vec![1];
+        image.base_address = FLASH_START + 62 * 1024 - 1;
+        assert!(prepare_image(&image).is_ok());
+        image.base_address += 1;
+        assert!(prepare_image(&image).is_err());
+        image.base_address = FLASH_START + 64 * 1024;
+        assert!(prepare_image(&image).is_err());
+    }
+
+    #[test]
+    fn removed_wl1_chip_choices_are_rejected_at_the_ipc_boundary() {
+        for chip in ["stm32f411xc", "stm32f411xe", "stm32f411cc", "stm32f103cb"] {
+            assert!(serde_json::from_value::<Chip>(serde_json::json!(chip)).is_err());
+        }
+        assert_eq!(
+            serde_json::from_str::<Chip>("\"stm32f411ceu\"").unwrap(),
+            Chip::Stm32f411ceu
+        );
+        assert_eq!(
+            serde_json::from_str::<Chip>("\"stm32f103c8t6\"").unwrap(),
+            Chip::Stm32f103c8t6
+        );
     }
 
     fn hex(lines: &[ihex::Record]) -> ImageRequest {
@@ -268,6 +340,28 @@ mod tests {
     }
 
     #[test]
+    fn gamebox_hex_checks_every_segment_against_the_settings_boundary() {
+        for (offset, length, accepted) in
+            [(0xf7ff, 1, true), (0xf7ff, 2, false), (0xf800, 1, false)]
+        {
+            let mut image = hex(&[
+                ihex::Record::ExtendedLinearAddress(0x0800),
+                ihex::Record::Data {
+                    offset: 0,
+                    value: vec![1, 2, 3, 4],
+                },
+                ihex::Record::Data {
+                    offset,
+                    value: vec![0x5a; length],
+                },
+                ihex::Record::EndOfFile,
+            ]);
+            image.chip = Chip::Stm32f103c8t6;
+            assert_eq!(prepare_image(&image).is_ok(), accepted);
+        }
+    }
+
+    #[test]
     fn empty_and_non_arm_images_are_rejected() {
         assert!(prepare_image(&request(ImageFormat::Bin, vec![], FLASH_START)).is_err());
         assert!(prepare_image(&hex(&[ihex::Record::EndOfFile])).is_err());
@@ -302,6 +396,14 @@ mod tests {
         bytes[116..120].copy_from_slice(&[1, 2, 3, 4]);
         let image = prepare_image(&request(ImageFormat::Elf, bytes.clone(), FLASH_START)).unwrap();
         assert_eq!(image.chunks, vec![(FLASH_START + 0x4000, vec![1, 2, 3, 4])]);
+        let mut gamebox_image = request(ImageFormat::Elf, bytes.clone(), FLASH_START);
+        gamebox_image.chip = Chip::Stm32f103c8t6;
+        assert!(prepare_image(&gamebox_image).is_ok());
+        gamebox_image.data[64..68].copy_from_slice(&0x0800_f800_u32.to_le_bytes());
+        assert!(prepare_image(&gamebox_image)
+            .err()
+            .unwrap()
+            .contains("设置保留区"));
         bytes[64..68].copy_from_slice(&0x2000_0000_u32.to_le_bytes());
         assert!(prepare_image(&request(ImageFormat::Elf, bytes, FLASH_START)).is_err());
     }

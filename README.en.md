@@ -42,7 +42,7 @@ See the [Firmware Integration Guide](docs/firmware-integration.md) for the compl
 
 ## WL1 firmware and Flash
 
-WL1 also has a **Firmware & Flash** page with embedded probe-rs for STM32F411 over ST-Link/SWD: BIN/HEX/ELF/AXF programming with read-back verification, separate main-Flash erase, and full 256/512 KiB reads with hex/ASCII browsing and BIN backup. Windows x64 includes the original ST USB driver; Linux includes a narrowly scoped udev rule. USB setup is a manual in-app action with system administrator consent, never a startup/install hook. No external programmer CLI is needed. See the [firmware guide](docs/wl1-firmware.md) for safety and hardware validation limits.
+WL1's **Firmware & Flash** page uses embedded probe-rs over ST-Link/SWD, with the target fixed to **STM32F411CEU / 512 KiB**. It supports BIN/HEX/ELF/AXF programming with read-back verification, separate main-Flash erase, and full Flash reads with hex/ASCII browsing and BIN backup. Windows x64 includes the original ST USB driver; Linux includes a narrowly scoped udev rule. USB setup is a manual in-app action with system administrator consent, never a startup/install hook. No external programmer CLI is needed. See the [firmware guide](docs/wl1-firmware.md) for safety and hardware validation limits.
 
 ## Motion workbench
 
@@ -54,7 +54,7 @@ VOFA ranges and slider steps are applied consistently in the UI and TypeScript/R
 
 GameBox receives eight-button diagnostics at **115200 baud / 8N1**, with event visualization and logs. It sends no serial probes, controls, or firmware bytes. The game/tool catalog describes applications running on the device; desktop and browser demos use explicitly labeled synthetic events.
 
-Local `.bin` checks cover size, Cortex-M vectors, and CRC-32 against the current **62 KiB application + 2 KiB settings** layout. They do not authenticate firmware or permit flashing. Updates currently use SWD. Versioned serial capabilities, external SPI Flash package storage, resumable transfer, and a recovery bootloader remain plans. Ordinary SPI NOR cannot extend the F103's directly executable firmware capacity, and a bootloader further reduces internal application space. See the [GameBox integration guide](docs/gamebox-integration.md) for the audited source baseline and pending hardware checks.
+GameBox's **Firmware & Flash** page currently targets **STM32F103C8T6 / 64 KiB**. Embedded probe-rs supports ST-Link programming of BIN/HEX/ELF/AXF, read-back verification, and full 64 KiB reads with hex/ASCII browsing and BIN backups. Updates are restricted to the first **62 KiB**, preserving the last **2 KiB settings** region; reads include both. It shares the existing offline USB setup workflow. **Storage & Checks** retains the independent local BIN size, vector and CRC-32 checker. Versioned serial capabilities, external SPI Flash storage and a recovery bootloader remain plans. See the [GameBox integration guide](docs/gamebox-integration.md) for partition boundaries and pending hardware checks.
 
 ## Technology
 

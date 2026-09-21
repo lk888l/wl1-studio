@@ -1,4 +1,4 @@
-//! WL1's ST-Link/SWD service. Jobs own the USB handle on a blocking worker and
+//! WL1 and GameBox ST-Link/SWD service. Jobs own USB on a blocking worker and
 //! reserve the product lifecycle before attaching. No probe-rs CLI is spawned.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -155,16 +155,18 @@ fn detailed_error(context: &str, error: impl std::error::Error) -> String {
 }
 
 fn check_identity(device_id: u32, size_kib: u16, chip: Chip) -> Result<(), String> {
-    if device_id & 0xfff != 0x431 {
+    if device_id & 0xfff != chip.device_id() {
         return Err(format!(
-            "实测芯片 ID 为 {:#05X}，不是 STM32F411（0x431），操作已拒绝",
-            device_id & 0xfff
+            "实测芯片 ID 为 {:#05X}，与 {} 的器件系列 ID（{:#05X}）不符，操作已拒绝",
+            device_id & 0xfff,
+            chip.name(),
+            chip.device_id()
         ));
     }
     if usize::from(size_kib) * 1024 != chip.size() {
         return Err(format!(
-            "芯片实测 Flash 为 {size_kib} KiB，与所选 {} KiB 不一致；请更正芯片容量",
-            chip.size() / 1024
+            "芯片实测 Flash 为 {size_kib} KiB，与产品固定目标 {} 的 {} KiB 不一致；请检查所连接的设备",
+            chip.name(), chip.size() / 1024
         ));
     }
     Ok(())
@@ -207,18 +209,14 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
         .read_word_32(0xe004_2000)
         .map_err(|error| detailed_error("无法读取芯片 ID", error))?;
     let mut size = [0; 2];
-    core.read_8(0x1fff_7a22, &mut size)
+    core.read_8(config.chip.size_register(), &mut size)
         .map_err(|error| detailed_error("无法读取 Flash 容量", error))?;
     check_identity(id, u16::from_le_bytes(size), config.chip)?;
     let mut uid = [0; 12];
-    core.read_8(0x1fff_7a10, &mut uid)
+    core.read_8(config.chip.uid_register(), &mut uid)
         .map_err(|error| detailed_error("无法读取芯片 UID", error))?;
     let info = ChipInfo {
-        name: match config.chip {
-            Chip::Stm32f411xc => "STM32F411xC",
-            Chip::Stm32f411xe => "STM32F411xE",
-        }
-        .into(),
+        name: config.chip.name().into(),
         device_id: id & 0xfff,
         revision_id: id >> 16,
         flash_start: FLASH_START,
@@ -239,7 +237,7 @@ pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
             != crate::gamebox::GameBoxMode::Disconnected
         || app.state::<crate::nfc::NfcState>().snapshot()?.mode != crate::nfc::NfcMode::Disconnected
     {
-        return Err("请先断开设备串口/Mock 会话，再操作 SWD 固件；电机电源应断开".into());
+        return Err("请先断开设备串口/演示/Mock 会话，再操作 SWD 固件".into());
     }
     app.state::<FirmwareState>().begin()
 }
@@ -466,10 +464,18 @@ pub async fn firmware_erase(
     config: ProbeConfig,
     confirmation: String,
 ) -> Result<FirmwareReport, String> {
+    validate_erase(config.chip, &confirmation)?;
+    execute(app, config, Operation::Erase).await
+}
+
+fn validate_erase(chip: Chip, confirmation: &str) -> Result<(), String> {
+    if chip == Chip::Stm32f103c8t6 {
+        return Err("游戏机更新会保留末尾 2 KiB 设置区，不提供整片擦除".into());
+    }
     if confirmation != "ERASE" {
         return Err("请输入 ERASE 确认清空全部主 Flash（包括固件和参数）".into());
     }
-    execute(app, config, Operation::Erase).await
+    Ok(())
 }
 
 #[tauri::command]
@@ -479,8 +485,8 @@ pub async fn firmware_flash(
     image: ImageRequest,
     confirmed_sha256: String,
 ) -> Result<FirmwareReport, String> {
-    if config.chip.size() != image.chip.size() {
-        return Err("固件检查时的芯片容量与烧录目标不一致，请重新检查".into());
+    if config.chip != image.chip {
+        return Err("固件检查时的目标芯片与当前产品不一致，请重新检查".into());
     }
     let prepared = tauri::async_runtime::spawn_blocking(move || prepare_image(&image))
         .await
@@ -497,11 +503,22 @@ mod tests {
 
     #[test]
     fn refuses_wrong_identity_and_capacity_before_operations() {
-        assert!(check_identity(0x1000_0431, 512, Chip::Stm32f411xe).is_ok());
-        assert!(check_identity(0x431, 256, Chip::Stm32f411xc).is_ok());
-        assert!(check_identity(0x413, 512, Chip::Stm32f411xe).is_err());
-        assert!(check_identity(0x431, 256, Chip::Stm32f411xe).is_err());
-        assert!(check_identity(0x431, 0xffff, Chip::Stm32f411xe).is_err());
+        assert!(check_identity(0x1000_0431, 512, Chip::Stm32f411ceu).is_ok());
+        assert!(check_identity(0x413, 512, Chip::Stm32f411ceu).is_err());
+        assert!(check_identity(0x431, 256, Chip::Stm32f411ceu).is_err());
+        assert!(check_identity(0x431, 0xffff, Chip::Stm32f411ceu).is_err());
+        assert!(check_identity(0x2003_0410, 64, Chip::Stm32f103c8t6).is_ok());
+        assert!(check_identity(0x410, 128, Chip::Stm32f103c8t6).is_err());
+        assert!(check_identity(0x410, 0xffff, Chip::Stm32f103c8t6).is_err());
+        assert!(check_identity(0x431, 64, Chip::Stm32f103c8t6).is_err());
+        assert!(check_identity(0x410, 512, Chip::Stm32f411ceu).is_err());
+    }
+
+    #[test]
+    fn full_erase_requires_confirmation_and_cannot_clear_gamebox_settings() {
+        assert!(validate_erase(Chip::Stm32f411ceu, "ERASE").is_ok());
+        assert!(validate_erase(Chip::Stm32f411ceu, "").is_err());
+        assert!(validate_erase(Chip::Stm32f103c8t6, "ERASE").is_err());
     }
 
     #[test]
@@ -523,12 +540,20 @@ mod tests {
     #[test]
     fn builtin_targets_and_algorithms_are_available_offline() {
         let registry = probe_rs::config::Registry::from_builtin_families();
-        for chip in [Chip::Stm32f411xc, Chip::Stm32f411xe] {
+        for (chip, algorithm) in [
+            (Chip::Stm32f411ceu, "stm32f4xx_1024"),
+            (Chip::Stm32f103c8t6, "stm32f10x_128"),
+        ] {
             let target = registry.get_target_by_name(chip.target()).unwrap();
             assert!(target
                 .flash_algorithms
                 .iter()
-                .any(|algo| algo.name == "stm32f4xx_1024"));
+                .any(|algo| algo.name == algorithm));
+            assert!(target.memory_map.iter().any(|region| matches!(
+                region,
+                probe_rs::config::MemoryRegion::Nvm(region)
+                    if region.range == (FLASH_START..FLASH_START + chip.size() as u64)
+            )));
             let mut loader = target.flash_loader();
             assert!(loader.add_data(FLASH_START, &[1, 2, 3, 4]).is_ok());
         }

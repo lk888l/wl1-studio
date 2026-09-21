@@ -14,9 +14,10 @@ import {
 } from "../../lib/gamebox-firmware";
 import type { SerialPortOption } from "../../types";
 import { isTauriRuntime } from "../../lib/device";
+import { FirmwarePage } from "../pages/FirmwarePage";
 import "./GameBoxStudio.css";
 
-type GameBoxPage = "overview" | "games" | "console" | "firmware";
+type GameBoxPage = "overview" | "games" | "console" | "firmware" | "storage";
 type Key = GameBoxButtonFrame["key"];
 type LogEntry = { id: number; timestamp: number; text: string; kind: "button" | "ready" | "raw" | "system" };
 type LastButton = { frame: GameBoxButtonFrame; timestamp: number };
@@ -25,7 +26,8 @@ const pages = [
   { id: "overview", label: "设备总览", icon: Gamepad2, caption: "连接设备，发现每一次按下。" },
   { id: "games", label: "游戏图鉴", icon: BookOpen, caption: "小小的屏幕，装下许多好玩的世界。" },
   { id: "console", label: "串口监视", icon: Terminal, caption: "从一行行事件，了解设备的每个动作。" },
-  { id: "firmware", label: "固件与存储", icon: HardDrive, caption: "看清今天的空间，为下一次扩展做好准备。" },
+  { id: "firmware", label: "固件与 Flash", icon: Cpu, caption: "通过 ST-Link 更新固件、读取和备份完整 Flash。" },
+  { id: "storage", label: "存储与检查", icon: HardDrive, caption: "检查本地 BIN 与存储布局，了解后续扩展。" },
 ] as const;
 const keys: Key[] = ["UP", "DOWN", "LEFT", "RIGHT", "JUMP", "FUNC", "ENTER", "BACK"];
 const actionLabels: Record<GameBoxButtonFrame["action"], string> = {
@@ -104,6 +106,8 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
   const [ports, setPorts] = useState<SerialPortOption[]>([]);
   const [port, setPort] = useState("");
   const [busy, setBusy] = useState(true);
+  const [firmwareVisited, setFirmwareVisited] = useState(false);
+  const [firmwareBusy, setFirmwareBusy] = useState(false);
   const [startupReady, setStartupReady] = useState(false);
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,6 +123,7 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
   const [gameFilter, setGameFilter] = useState<"全部" | "游戏" | "工具">("全部");
   const mounted = useRef(false);
   const busyRef = useRef(true);
+  const firmwareBusyRef = useRef(false);
   const refreshingRef = useRef(false);
   const logId = useRef(0);
   const currentSession = useRef<number | undefined>(snapshot.sessionId);
@@ -127,6 +132,17 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
   const firmwareRequest = useRef(0);
   const consoleEnd = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const handleFirmwareBusy = useCallback((next: boolean) => {
+    firmwareBusyRef.current = next;
+    setFirmwareBusy(next);
+  }, []);
+
+  const changePage = (next: GameBoxPage) => {
+    if (firmwareBusyRef.current) return;
+    if (next === "firmware") setFirmwareVisited(true);
+    setPage(next);
+  };
 
   const applySnapshot = useCallback((next: GameBoxSnapshot) => {
     if (!mounted.current) return;
@@ -211,7 +227,7 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
   }, [logs, autoScroll, page]);
 
   async function connectionAction(action: "serial" | "demo" | "disconnect" | "back") {
-    if (busyRef.current || !startupReady) return;
+    if (busyRef.current || firmwareBusyRef.current || !startupReady) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -267,31 +283,31 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
   return (
     <div className="gb-studio">
       <aside className="gb-sidebar">
-        <button className="gb-back" type="button" disabled={busy || !startupReady} onClick={() => void connectionAction("back")}><ArrowLeft size={16} />返回产品库</button>
+        <button className="gb-back" type="button" disabled={busy || firmwareBusy || !startupReady} onClick={() => void connectionAction("back")}><ArrowLeft size={16} />返回产品库</button>
         <div className="gb-brand"><span className="gb-brand__icon"><Gamepad2 size={27} /></span><div><strong>GameBox</strong><span>掌上游戏机工作台</span></div></div>
         <span className="gb-nav-label">工作空间</span>
         <nav className="gb-nav" aria-label="游戏机工作空间">
-          {pages.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={page === id ? "is-active" : ""} aria-current={page === id ? "page" : undefined} onClick={() => setPage(id)}><Icon size={19} /><span>{label}</span>{page === id && <ChevronRight size={14} />}</button>)}
+          {pages.map(({ id, label, icon: Icon }) => <button key={id} type="button" disabled={firmwareBusy} className={page === id ? "is-active" : ""} aria-current={page === id ? "page" : undefined} onClick={() => changePage(id)}><Icon size={19} /><span>{label}</span>{page === id && <ChevronRight size={14} />}</button>)}
         </nav>
         <div className="gb-sidebar__hardware"><CircuitBoard size={28} /><strong>一块芯片，无限乐趣</strong><p>STM32F103C8T6<br />128 × 64 OLED · 8 枚按键</p><span>GAMEBOX / 01</span></div>
         <div className={`gb-sidebar__status${connected ? " is-connected" : ""}`}><i /><div><strong>{statusLabel}</strong><span>{connected ? snapshot.label : "连接设备，或先体验演示"}</span></div></div>
       </aside>
 
       <main className="gb-workspace">
-        <header className="gb-topbar"><div className="gb-breadcrumb">设备控制中心<ChevronRight size={14} /><strong>GameBox</strong></div><span className="gb-topbar__tag"><Radio size={13} />串口接收工作台</span></header>
+        <header className="gb-topbar"><div className="gb-breadcrumb">设备控制中心<ChevronRight size={14} /><strong>GameBox</strong></div><span className="gb-topbar__tag"><Radio size={13} />串口与固件工作台</span></header>
         <div className="gb-content">
-          <div className="gb-page-heading"><div><span className="gb-eyebrow">STM GAMEBOX / {String(pages.findIndex((item) => item.id === page) + 1).padStart(2, "0")}</span><h1>{meta.label}</h1><p>{meta.caption}</p></div><span className={`gb-status-pill${snapshot.identified ? " is-ready" : ""}${snapshot.mode === "demo" ? " is-demo" : ""}`}><i />{statusLabel}</span></div>
+          {page !== "firmware" && <div className="gb-page-heading"><div><span className="gb-eyebrow">STM GAMEBOX / {String(pages.findIndex((item) => item.id === page) + 1).padStart(2, "0")}</span><h1>{meta.label}</h1><p>{meta.caption}</p></div><span className={`gb-status-pill${snapshot.identified ? " is-ready" : ""}${snapshot.mode === "demo" ? " is-demo" : ""}`}><i />{statusLabel}</span></div>}
           <section className="gb-connection" aria-label="串口连接设置">
             <span className="gb-connection__icon"><Cable size={21} /></span>
-            <div className="gb-port-field"><label htmlFor="gb-port">设备串口</label><select id="gb-port" value={port} disabled={busy || connected || refreshing} onChange={(event) => setPort(event.target.value)}>{ports.length === 0 && <option value="">{refreshing ? "正在查找串口…" : "暂无串口"}</option>}{ports.map((item) => <option key={item.name} value={item.name}>{item.name}{item.product ? ` · ${item.product}` : ""}</option>)}</select></div>
-            <button type="button" className="gb-icon-button" aria-label="刷新串口列表" title="刷新串口列表" disabled={busy || connected || refreshing} onClick={() => void refreshPorts()}><RefreshCw size={17} className={refreshing ? "gb-spin" : ""} /></button>
+            <div className="gb-port-field"><label htmlFor="gb-port">设备串口</label><select id="gb-port" value={port} disabled={busy || firmwareBusy || connected || refreshing} onChange={(event) => setPort(event.target.value)}>{ports.length === 0 && <option value="">{refreshing ? "正在查找串口…" : "暂无串口"}</option>}{ports.map((item) => <option key={item.name} value={item.name}>{item.name}{item.product ? ` · ${item.product}` : ""}</option>)}</select></div>
+            <button type="button" className="gb-icon-button" aria-label="刷新串口列表" title="刷新串口列表" disabled={busy || firmwareBusy || connected || refreshing} onClick={() => void refreshPorts()}><RefreshCw size={17} className={refreshing ? "gb-spin" : ""} /></button>
             <span className="gb-serial-spec">115200 <i />8N1</span>
-            {connected ? <button type="button" className="gb-button gb-button--neutral" disabled={busy} onClick={() => void connectionAction("disconnect")}>{busy ? <LoaderCircle size={16} className="gb-spin" /> : <Unplug size={16} />}断开连接</button> : <button type="button" className="gb-button" disabled={busy || !startupReady || !port || refreshing} onClick={() => void connectionAction("serial")}>{busy ? <LoaderCircle size={16} className="gb-spin" /> : <Cable size={16} />}连接设备</button>}
+            {connected ? <button type="button" className="gb-button gb-button--neutral" disabled={busy || firmwareBusy} onClick={() => void connectionAction("disconnect")}>{busy ? <LoaderCircle size={16} className="gb-spin" /> : <Unplug size={16} />}断开连接</button> : <button type="button" className="gb-button" disabled={busy || firmwareBusy || !startupReady || !port || refreshing} onClick={() => void connectionAction("serial")}>{busy ? <LoaderCircle size={16} className="gb-spin" /> : <Cable size={16} />}连接设备</button>}
             <div className="gb-connection__divider" />
-            <button type="button" className="gb-button gb-button--ghost" disabled={busy || !startupReady || connected} onClick={() => void connectionAction("demo")}><Gamepad2 size={17} />体验演示</button>
+            <button type="button" className="gb-button gb-button--ghost" disabled={busy || firmwareBusy || !startupReady || connected} onClick={() => void connectionAction("demo")}><Gamepad2 size={17} />体验演示</button>
           </section>
 
-          {!isTauriRuntime() && snapshot.mode !== "demo" && <p className="gb-fineprint">浏览器预览可体验演示和检查固件；真实串口请在桌面应用中连接。</p>}
+          {!isTauriRuntime() && snapshot.mode !== "demo" && <p className="gb-fineprint">浏览器预览可体验演示和本地检查；真实串口与 ST-Link 烧录、读取请使用桌面应用。</p>}
           {error && <div className="gb-alert gb-alert--error" role="alert"><CircleHelp size={18} /><span>{error}</span><button type="button" className="gb-icon-button" aria-label="关闭错误提示" onClick={() => setError(null)}><X size={15} /></button></div>}
           {!startupReady && !busy && <div className="gb-note"><CircleHelp size={17} /><p>接收服务初始化未完成，请重试后连接设备或返回产品库。</p><button type="button" className="gb-button" onClick={() => { setError(null); setStartupAttempt((value) => value + 1); }}>重新初始化</button></div>}
           {(snapshot.droppedLines ?? 0) > 0 && <div className="gb-note" role="status"><CircleHelp size={17} /><p>串口流量超过显示速率，后端已丢弃 {snapshot.droppedLines?.toLocaleString()} 行排队日志；当前按键统计只覆盖已显示事件。</p></div>}
@@ -321,7 +337,9 @@ export function GameBoxStudio({ onBack }: { onBack: () => void }) {
             <section className="gb-panel gb-protocol"><div><span className="gb-eyebrow">SERIAL PROTOCOL</span><h2>读懂一条按键事件</h2><p>当前固件主动上报启动标识与按键状态，上位机被动接收。</p></div><div className="gb-protocol-example"><code>BTN 1234 UP CLICK 80</code><div><span><b>1234</b>设备运行时间 ms</span><span><b>UP</b>按键名称</span><span><b>CLICK</b>事件类型</span><span><b>80</b>持续时间 ms</span></div></div></section>
           </div>}
 
-          {page === "firmware" && <div className="gb-page">
+          {firmwareVisited && <div hidden={page !== "firmware"}><FirmwarePage product="gamebox" connected={connected} connectionBusy={busy || !startupReady} onBusyChange={handleFirmwareBusy} /></div>}
+
+          {page === "storage" && <div className="gb-page">
             <div className="gb-firmware-grid"><section className="gb-panel gb-firmware-file"><div className="gb-panel-heading"><div><span className="gb-eyebrow">LOCAL FIRMWARE</span><h2>先了解你的固件</h2></div><FileCode2 size={21} /></div><p className="gb-panel-description">选择本地 .bin 文件，检查大小、向量表与 CRC32。文件只在本机分析。</p><input ref={fileInput} className="gb-file-input" type="file" accept=".bin,application/octet-stream" aria-label="选择 GameBox 固件文件" onChange={(event) => void selectFirmware(event)} /><button className="gb-file-picker" type="button" onClick={() => fileInput.current?.click()}>{fileBusy ? <LoaderCircle size={27} className="gb-spin" /> : <FileUp size={29} />}<strong>{fileBusy ? "正在分析固件…" : report ? "重新选择固件文件" : "选择 .bin 固件"}</strong><span>{report ? report.name : "原始二进制 · 本地校验 · 不写入设备"}</span></button>{fileError && <div className="gb-alert gb-alert--error" role="alert"><CircleHelp size={17} /><span>{fileError}</span></div>}{report && <div className="gb-firmware-report"><dl className="gb-spec-list"><div><dt>固件大小</dt><dd>{report.size.toLocaleString()} B · {(report.size / 1024).toFixed(2)} KiB</dd></div><div><dt>CRC32</dt><dd><code>{report.crc32}</code></dd></div><div><dt>初始栈指针</dt><dd><code>{hex(report.initialStackPointer)}</code></dd></div><div><dt>复位向量</dt><dd><code>{hex(report.resetVector)}</code></dd></div></dl><div className="gb-report-checks"><span className={report.vectorValid ? "is-good" : "is-warning"}>{report.vectorValid ? <Check size={14} /> : <CircleHelp size={14} />}{report.vectorValid ? "向量表基础检查通过" : "向量表需要检查"}</span><span className={report.fitsInternalFlash ? "is-good" : "is-warning"}>{report.fitsInternalFlash ? <Check size={14} /> : <CircleHelp size={14} />}{report.fitsInternalFlash ? "适配当前 62 KiB 应用区" : "不适配当前 62 KiB 应用区"}</span></div>{report.issues.length > 0 && <ul className="gb-firmware-issues">{report.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>}<p className="gb-fineprint">基础检查不验证板型、功能兼容性或固件签名，不能替代设备验证。</p></div>}</section>
               <section className="gb-panel gb-flash-panel"><div className="gb-panel-heading"><div><span className="gb-eyebrow">ON-CHIP FLASH</span><h2>64 KiB，精打细算。</h2></div><Cpu size={21} /></div><div className="gb-memory-headline"><strong>62<small>KiB</small></strong><span>当前应用程序区<br /><b>另有 2 KiB 保存设置</b></span></div><div className="gb-flash-bar" role="img" aria-label="内置 Flash 分区：62 KiB 应用，2 KiB 设置"><span className="gb-flash-bar__app">应用程序 · 62 KiB</span><span className="gb-flash-bar__settings" /></div><div className="gb-memory-legend"><span><i />应用区</span><span><i />设置页 · 2 KiB</span></div><dl className="gb-address-list"><div><dt>应用程序</dt><dd>0x08000000 – 0x0800F7FF</dd></div><div><dt>设置页 A / B</dt><dd>0x0800F800 / 0x0800FC00</dd></div></dl><div className="gb-baseline"><span>源码构建产物参考</span><div><strong>59.19 KiB<small>SPI OLED 版本</small></strong><strong>60.34 KiB<small>I²C OLED 版本</small></strong></div><p>本地固件基线，并非从当前设备读取；以重新构建后的文件为准。</p></div></section></div>
             <section className="gb-storage-roadmap"><div className="gb-storage-roadmap__intro"><span className="gb-eyebrow">NEXT CHAPTER</span><h2>把空间，留给更多可能。</h2><p>为外置 SPI Flash 预留工作流；容量与引脚待硬件方案确定。</p><span><HardDrive size={16} />外置存储规划中</span></div><div className="gb-roadmap-steps"><div><span className="is-current">01</span><div><h3>现在 · 串口观测</h3><p>接收事件、本地固件检查。当前通过 SWD / probe-rs 更新。</p></div></div><div><span>02</span><div><h3>下一步 · 外置存储</h3><p>规划镜像暂存、元数据和校验区；选型、分区与引脚尚未确定。</p></div></div><div><span>03</span><div><h3>后续 · 可靠升级</h3><p>增加 Bootloader 与双端升级协议，完成分包传输、校验与异常恢复。</p></div></div></div></section>

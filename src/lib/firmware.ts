@@ -1,11 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./device";
+import { GAMEBOX_APPLICATION_BYTES } from "./gamebox-firmware";
 
 export const FLASH_START = 0x08000000;
 export const MAX_FIRMWARE_SIZE = 16 * 1024 * 1024;
 export const FLASH_PAGE_SIZE = 256;
-export type FirmwareChip = "stm32f411xc" | "stm32f411xe";
+export type FirmwareChip = "stm32f411ceu" | "stm32f103c8t6";
+export type FirmwareProduct = "wl1" | "gamebox";
 export type FirmwareFormat = "bin" | "hex" | "elf";
+
+export const FIRMWARE_TARGETS = {
+  wl1: { chip: "stm32f411ceu", label: "STM32F411CEU", flashSize: 512 * 1024, programSize: 512 * 1024, canErase: true, backupPrefix: "WL1" },
+  gamebox: { chip: "stm32f103c8t6", label: "STM32F103C8T6", flashSize: 64 * 1024, programSize: GAMEBOX_APPLICATION_BYTES, canErase: false, backupPrefix: "GameBox" },
+} as const satisfies Record<FirmwareProduct, {
+  chip: FirmwareChip; label: string; flashSize: number; programSize: number; canErase: boolean; backupPrefix: string;
+}>;
 
 export interface ProbeOption {
   id: string;
