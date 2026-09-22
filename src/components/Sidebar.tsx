@@ -4,6 +4,7 @@ import {
   Cpu,
   GitFork,
   Gauge,
+  Gamepad2,
   Radio,
   SlidersHorizontal,
   Stethoscope,
@@ -15,6 +16,7 @@ import { isRemoteConnection } from "../lib/connection";
 
 const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
   { id: "tuning", label: "运动工作台", icon: SlidersHorizontal },
+  { id: "control", label: "实时遥控", icon: Gamepad2 },
   { id: "overview", label: "总览", icon: Activity },
   { id: "kinematics", label: "腿部运动学", icon: GitFork },
   { id: "calibration", label: "标定向导", icon: WandSparkles },

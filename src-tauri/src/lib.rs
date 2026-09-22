@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod bluetooth;
 mod commands;
 mod firmware;
 mod firmware_image;
@@ -44,6 +45,7 @@ pub fn run() {
     refuse_linux_root_execution();
     tauri::Builder::default()
         .manage(state::AppState::default())
+        .manage(bluetooth::BluetoothState::default())
         .manage(gamebox::GameBoxState::default())
         .manage(nfc::NfcState::default())
         .manage(commands::ProductSessionLifecycle::default())
@@ -58,6 +60,7 @@ pub fn run() {
             firmware_usb::firmware_usb_support,
             firmware_usb::firmware_install_usb_support,
             commands::list_serial_ports,
+            commands::scan_bluetooth_devices,
             commands::connect_device,
             commands::disconnect_device,
             commands::send_text_command,

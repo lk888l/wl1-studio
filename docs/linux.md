@@ -19,7 +19,7 @@ sudo apt update
 sudo apt install --no-install-recommends \
   build-essential curl file wget patchelf \
   libayatana-appindicator3-dev librsvg2-dev libssl-dev \
-  libwebkit2gtk-4.1-dev libxdo-dev
+  libwebkit2gtk-4.1-dev libxdo-dev libdbus-1-dev bluez
 sudo usermod -aG dialout "$(id -un)"
 ```
 
@@ -46,6 +46,8 @@ npm run tauri dev
 只开发界面时可以运行 `npm run dev` 并使用 WL1 Mock。电子琴硬件协议尚未实现：开发构建可访问其交互预览，生产构建默认禁用。只有在明确需要评审预览时才可设置 `VITE_ENABLE_PIANO_PREVIEW=true`。
 
 ## 串口权限与稳定设备身份
+
+ZX-D30 BLE 使用系统 BlueZ / D-Bus，通过桌面会话授予蓝牙权限，不使用 USB 串口权限。编译需要 `libdbus-1-dev`，运行需启用系统蓝牙。详细流程见[蓝牙遥控指南](bluetooth-control.md)。
 
 先确认设备节点和权限：
 

@@ -133,7 +133,8 @@ Transport 只表达“打开、关闭、写入字节、接收字节、取消”�
 |---|---|---|
 | Mock 会话 | 无硬件界面开发、稳定演示 | 已实现；Tauri 走 Rust 事件链，纯浏览器提供本地预览 |
 | ReplayTransport | 回放脱敏的串口记录、复现解析问题 | 未实现；在遥测格式稳定后加入 |
-| SerialTransport | 当前 WL1 feature/framework 固件 | 已实现；115200 8N1，细节见 WL1 固件接入文档 |
+| SerialTransport | WL1 USB / 遥控器桥接 | USB 可选 9600 / 115200；遥控器固定 115200 |
+| BluetoothTransport | ZX-D30 BLE UART / WL1 SoftEngine | 原生 btleplug，FFE2 写 / FFE1 通知，20 字节分包、200 ms 帧截止；复用 WL1 会话与命令校验 |
 | GameBox 串口 reader | 当前 GameBox FW2 按键诊断 | 已实现独立只读服务；115200 8N1，无写接口，待实机联调 |
 | CanTransport | 将来直接访问 CAN/CAN-FD | 仅保留接口，不猜测帧格式 |
 | UdpTransport | 将来的网关或无线链路 | 仅保留接口，需另行定义身份与可靠性 |

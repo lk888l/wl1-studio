@@ -9,6 +9,8 @@ This repository implements an extensible, multi-product desktop control applicat
 
 ## Current scope
 
+WL1 supports native **discovery and remote control for the BLE-only ZX-D30 module**. Each real connection starts read-only unless explicitly authorized; choose a leg height and enable control before holding W/A/S/D, arrows, or on-screen buttons. Release sends neutral, Space / Escape stops, and losing focus disarms control. Bluetooth uses 10 Hz updates and framed 20-byte BLE packets. See the [Bluetooth guide](docs/bluetooth-control.md) for SoftEngine firmware requirements, platform setup, and 9600-baud telemetry limits.
+
 The WL1 workspace now offers **Direct robot** and **Tune through remote** serial targets. Remote tuning forwards PID and attitude-bias commands through NRF24L01 and requires the companion serial-bridge firmware; the original remote firmware does not start UART RX. It has no robot telemetry or parameter-execution acknowledgements, and physical joysticks retain motion and height control. See the [remote tuning guide](docs/remote-tuning.md). The Legacy telemetry and idle-framing details below apply to direct robot connections.
 
 The codebase now has a cross-platform “product home + isolated workspace + Rust device gateway” foundation. The WL1 compatibility layer was checked against both the committed `feature/framework@8f8eb82` baseline and the uncommitted control/communication changes in the local firmware working tree as of 2026-08-24. GameBox independently receives the `FW2` button-event protocol. Future products should provide their own protocol, Transport, pages, and safety policy, with real interfaces, hardware-free demos, and outstanding device validation clearly identified.

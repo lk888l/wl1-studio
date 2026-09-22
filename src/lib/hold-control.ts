@@ -13,6 +13,18 @@ export function neutralMotion(height: number): MotionTarget {
   return { turn: 0, velocity: 0, roll: 0, height };
 }
 
+export type MotionDirection = "forward" | "backward" | "left" | "right";
+
+/** Match the WL1 remote and WeChat client: forward uses negative velocity. */
+export function directionalMotion(directions: ReadonlySet<MotionDirection>, settings: { speed: number; roll: number; height: number }): MotionTarget {
+  return {
+    turn: (directions.has("right") ? settings.speed : 0) - (directions.has("left") ? settings.speed : 0),
+    velocity: (directions.has("backward") ? settings.speed : 0) - (directions.has("forward") ? settings.speed : 0),
+    roll: settings.roll,
+    height: settings.height,
+  };
+}
+
 export class HoldCommandRepeater {
   private handle: unknown;
   private target: MotionTarget | null = null;
@@ -29,13 +41,14 @@ export class HoldCommandRepeater {
   begin(target: MotionTarget): void {
     this.stopTimer();
     this.target = { ...target };
-    this.sendCurrent();
     this.handle = this.timer.set(() => this.sendCurrent(), this.intervalMs);
+    this.sendCurrent();
   }
 
   update(target: MotionTarget): void {
     if (!this.target) return;
     this.target = { ...target };
+    if (this.pending) this.pending = { ...target };
   }
 
   release(): void {
@@ -68,7 +81,7 @@ export class HoldCommandRepeater {
       const result = this.emit({ ...next });
       if (result && typeof result.then === "function") {
         void result
-          .catch(this.onError)
+          .catch((error: unknown) => this.fail(error))
           .finally(() => {
             this.inFlight = false;
             this.drain();
@@ -79,9 +92,16 @@ export class HoldCommandRepeater {
       }
     } catch (error) {
       this.inFlight = false;
-      this.onError(error);
+      this.fail(error);
       this.drain();
     }
+  }
+
+  private fail(error: unknown): void {
+    this.stopTimer();
+    this.target = null;
+    this.pending = null;
+    this.onError(error);
   }
 
   private stopTimer(): void {

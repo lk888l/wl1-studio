@@ -23,6 +23,12 @@
 .device-link__preview, .device-link__connected-note { flex: 1; color: var(--muted); font-size: 12px; }
 .device-link__hint { margin: 10px 0 0 48px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .device-link__error { margin-top: 10px; }
+.device-link__options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0 0 48px; }
+.device-link__write-permission { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.device-link__write-permission input { flex: 0 0 auto; accent-color: var(--accent); }
+.device-link__baud { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+.device-link__baud select { padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; }
+.device-link__scan { flex: 0 0 auto; padding: 0 10px; white-space: nowrap; }
 .device-link__details { margin-top: 7px; }
 .device-link__details summary { display: flex; width: fit-content; min-height: 24px; gap: 4px; align-items: center; margin-left: 46px; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
 .device-link__details summary::-webkit-details-marker { display: none; }
@@ -44,7 +50,7 @@
   .device-link__choices { flex: 0 0 auto; }
   .device-link__port { min-width: 0; flex-basis: calc(100% - 140px); }
   .device-link__preview { flex-basis: 50%; }
-  .device-link__hint, .device-link__details summary, .device-link__details-content { margin-left: 0; }
+  .device-link__hint, .device-link__details summary, .device-link__details-content, .device-link__options { margin-left: 0; }
   .device-link__connected-note { display: none; }
 }
 

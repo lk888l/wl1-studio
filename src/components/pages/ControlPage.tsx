@@ -12,15 +12,16 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
-import { HoldCommandRepeater, neutralMotion } from "../../lib/hold-control";
+import { directionalMotion, HoldCommandRepeater, neutralMotion, type MotionDirection } from "../../lib/hold-control";
 import { motionCommand } from "../../lib/device";
 import type { MotionTarget, TelemetrySample } from "../../types";
 import "./ControlPage.css";
 
-type Direction = "forward" | "backward" | "left" | "right";
+type Direction = MotionDirection;
 
 interface ControlPageProps {
   compact?: boolean;
+  commandIntervalMs?: number;
   connected: boolean;
   writesUnlocked: boolean;
   suspended: boolean;
@@ -83,18 +84,19 @@ function MotionTargetControl({ label, value, min, max, step, unit, hint, disable
 }
 
 const directionKeys: Record<string, Direction> = {
-  w: "forward",
+  KeyW: "forward",
   ArrowUp: "forward",
-  s: "backward",
+  KeyS: "backward",
   ArrowDown: "backward",
-  a: "left",
+  KeyA: "left",
   ArrowLeft: "left",
-  d: "right",
+  KeyD: "right",
   ArrowRight: "right",
 };
 
 export function ControlPage({
   compact = false,
+  commandIntervalMs = 50,
   connected,
   writesUnlocked,
   suspended,
@@ -120,19 +122,14 @@ export function ControlPage({
   const repeater = useRef<HoldCommandRepeater | null>(null);
   const keyboardDirections = useRef(new Set<Direction>());
   const pointerDirection = useRef<Direction | null>(null);
+  const activePointerId = useRef<number | null>(null);
   const wasActive = useRef(false);
   const settings = useRef({ speed, roll, height });
 
   const composeTarget = useCallback((): MotionTarget => {
     const active = new Set(keyboardDirections.current);
     if (pointerDirection.current) active.add(pointerDirection.current);
-    const velocity =
-      (active.has("forward") ? settings.current.speed : 0) -
-      (active.has("backward") ? settings.current.speed : 0);
-    const turn =
-      (active.has("right") ? settings.current.speed : 0) -
-      (active.has("left") ? settings.current.speed : 0);
-    return { turn, velocity, roll: settings.current.roll, height: settings.current.height };
+    return directionalMotion(active, settings.current);
   }, []);
 
   const syncSender = useCallback((): void => {
@@ -153,6 +150,7 @@ export function ControlPage({
   const stopAll = useCallback((): void => {
     keyboardDirections.current.clear();
     pointerDirection.current = null;
+    activePointerId.current = null;
     setActiveDirection(null);
     syncSender();
   }, [syncSender]);
@@ -160,15 +158,20 @@ export function ControlPage({
   useEffect(() => {
     repeater.current = new HoldCommandRepeater(
       onSendMotion,
-      50,
+      commandIntervalMs,
       undefined,
-      (reason) => setError(reason instanceof Error ? reason.message : String(reason)),
+      (reason) => {
+        armedRef.current = false;
+        setArmed(false);
+        stopAll();
+        setError(reason instanceof Error ? reason.message : String(reason));
+      },
     );
     return () => {
       repeater.current?.dispose();
       repeater.current = null;
     };
-  }, [onSendMotion]);
+  }, [commandIntervalMs, onSendMotion, stopAll]);
 
   useEffect(() => {
     // An unselected height is only a preview. Release must retain the last chosen height.
@@ -189,24 +192,35 @@ export function ControlPage({
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
-      const direction = directionKeys[event.key];
+      if (armedRef.current && (event.code === "Space" || event.key === "Escape")) {
+        event.preventDefault();
+        armedRef.current = false;
+        setArmed(false);
+        stopAll();
+        return;
+      }
+      const direction = directionKeys[event.code];
       const target = event.target as HTMLElement | null;
-      if (!armedRef.current || !connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null || !direction || event.repeat || target?.matches("input, textarea, select") || target?.isContentEditable) return;
+      if (!armedRef.current || !connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null || !direction || event.repeat || event.ctrlKey || event.metaKey || event.altKey || target?.matches("input, textarea, select") || target?.isContentEditable) return;
       event.preventDefault();
       keyboardDirections.current.add(direction);
       setActiveDirection(direction);
       syncSender();
     };
     const keyUp = (event: KeyboardEvent) => {
-      const direction = directionKeys[event.key];
+      const direction = directionKeys[event.code];
       if (!direction) return;
       keyboardDirections.current.delete(direction);
       setActiveDirection(keyboardDirections.current.values().next().value ?? pointerDirection.current);
       syncSender();
     };
-    const blur = () => stopAll();
+    const blur = () => {
+      armedRef.current = false;
+      setArmed(false);
+      stopAll();
+    };
     const visibility = () => {
-      if (document.visibilityState !== "visible") stopAll();
+      if (document.visibilityState !== "visible") blur();
     };
     window.addEventListener("keydown", keyDown);
     window.addEventListener("keyup", keyUp);
@@ -222,15 +236,18 @@ export function ControlPage({
   }, [connected, heightTarget, stopAll, suspended, syncSender, telemetryHealthy, writesUnlocked]);
 
   const beginPointer = (direction: Direction, event: PointerEvent<HTMLButtonElement>): void => {
-    if (event.button !== 0 || !armedRef.current || !connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null) return;
+    if (event.button !== 0 || activePointerId.current !== null || !armedRef.current || !connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    activePointerId.current = event.pointerId;
     pointerDirection.current = direction;
     setActiveDirection(direction);
     syncSender();
   };
 
-  const endPointer = (): void => {
+  const endPointer = (event: PointerEvent<HTMLButtonElement>): void => {
+    if (activePointerId.current !== event.pointerId) return;
+    activePointerId.current = null;
     pointerDirection.current = null;
     setActiveDirection(keyboardDirections.current.values().next().value ?? null);
     syncSender();
@@ -252,6 +269,7 @@ export function ControlPage({
   const toggleArmed = (): void => {
     if (!connected || !writesUnlocked || suspended || !telemetryHealthy || heightTarget === null) return;
     const next = !armedRef.current;
+    setError(null);
     armedRef.current = next;
     setArmed(next);
     if (!next) stopAll();
@@ -259,7 +277,7 @@ export function ControlPage({
 
   const preview = heightTarget === null
     ? "请先选择腿高目标"
-    : motionCommand({ turn: 0, velocity: speed, roll, height });
+    : motionCommand({ turn: 0, velocity: -speed, roll, height });
   const controlsAvailable = connected && writesUnlocked && !suspended && telemetryHealthy && heightTarget !== null;
   const armHint = !connected ? "连接设备后可启用"
     : !writesUnlocked ? "当前为只读连接，无法启用运动控制"
@@ -296,13 +314,13 @@ export function ControlPage({
           <div className={"motion-pad" + (!armed || !controlsAvailable ? " is-disabled" : "")}>
             <button className={"motion-key motion-key--up" + (activeDirection === "forward" ? " is-active" : "")} type="button" disabled={!armed || !controlsAvailable} aria-label="按住前进" onPointerDown={(event) => beginPointer("forward", event)} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}><ArrowUp /><span>前进<small>W</small></span></button>
             <button className={"motion-key motion-key--left" + (activeDirection === "left" ? " is-active" : "")} type="button" disabled={!armed || !controlsAvailable} aria-label="按住左转" onPointerDown={(event) => beginPointer("left", event)} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}><ArrowLeft /><span>左转<small>A</small></span></button>
-            <div className="motion-center"><Gamepad2 size={compact ? 22 : 27} /><small>{compact ? "按住" : "20 Hz"}</small></div>
+            <div className="motion-center"><Gamepad2 size={compact ? 22 : 27} /><small>{compact ? "按住" : `${1000 / commandIntervalMs} Hz`}</small></div>
             <button className={"motion-key motion-key--right" + (activeDirection === "right" ? " is-active" : "")} type="button" disabled={!armed || !controlsAvailable} aria-label="按住右转" onPointerDown={(event) => beginPointer("right", event)} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}><ArrowRight /><span>右转<small>D</small></span></button>
             <button className={"motion-key motion-key--down" + (activeDirection === "backward" ? " is-active" : "")} type="button" disabled={!armed || !controlsAvailable} aria-label="按住后退" onPointerDown={(event) => beginPointer("backward", event)} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}><ArrowDown /><span>后退<small>S</small></span></button>
           </div>
 
           {compact && <button className="stop-button control-stop" type="button" disabled={!connected || !writesUnlocked || heightTarget === null} onClick={() => void emergencyStop()}><Octagon size={17} />立即停止</button>}
-          <p className="control-release-hint">松开方向或切走窗口会停止运动目标。</p>
+          <p className="control-release-hint">松开停止 · 空格 / Esc 停止并停用 · 切走窗口后需重新启用</p>
           {telemetryRequired && !telemetryHealthy && <div className="inline-error">姿态或轮速数据未就绪，控制已停用。数据恢复后请重新启用。</div>}
         </section>
 

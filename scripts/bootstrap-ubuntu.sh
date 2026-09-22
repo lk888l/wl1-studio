@@ -12,7 +12,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 sudo apt-get update
-sudo apt-get install --yes --no-install-recommends build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+sudo apt-get install --yes --no-install-recommends build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev libdbus-1-dev bluez patchelf wget
 
 current_user="$(id -un)"
 if [[ "${1:-}" == "--with-dialout" ]]; then

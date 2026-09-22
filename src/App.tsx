@@ -33,7 +33,7 @@ import {
 import { deviceGateway, motionCommand } from "./lib/device";
 import { gameboxGateway } from "./lib/gamebox";
 import { nfcGateway } from "./lib/nfc";
-import { isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
+import { BLUETOOTH_COMMAND_INTERVAL_MS, isBluetoothConnection, isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
 import { appendTelemetrySample, telemetryChannelFresh } from "./lib/telemetry";
 import {
   defaultPersonalization,
@@ -43,6 +43,7 @@ import {
   saveProfiles,
 } from "./lib/storage";
 import type {
+  BluetoothDeviceOption,
   ConnectionSnapshot,
   ConsoleEntry,
   MotionTarget,
@@ -296,6 +297,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [ports, setPorts] = useState<SerialPortOption[]>([]);
+  const [bluetoothDevices, setBluetoothDevices] = useState<BluetoothDeviceOption[]>([]);
   const [samples, setSamples] = useState<TelemetrySample[]>([]);
   const [consoleEntries, setConsoleEntries] = useState<ConsoleEntry[]>([initialConsole]);
   const [telemetryEnabled, setTelemetryEnabled] = useState(false);
@@ -314,6 +316,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
 
   const connected = connection.mode !== "disconnected";
   const remote = isRemoteConnection(connection);
+  const bluetooth = isBluetoothConnection(connection);
   const writesUnlocked = connected && connection.writesUnlocked;
   const activeSessionId = connection.sessionId;
   const latest = samples.at(-1);
@@ -406,6 +409,21 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
     if (startupReady) void refreshPorts();
   }, [refreshPorts, startupReady]);
 
+  const scanBluetooth = useCallback(async (): Promise<void> => {
+    setConnectionBusy(true);
+    setConnectionError(null);
+    try {
+      const devices = await deviceGateway.scanBluetoothDevices();
+      setBluetoothDevices(devices);
+      if (!devices.length) setConnectionError("未发现蓝牙设备。请确认 ZX-D30 已上电、未连接其他应用，然后重新扫描。");
+    } catch (reason) {
+      setBluetoothDevices([]);
+      setConnectionError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setConnectionBusy(false);
+    }
+  }, []);
+
   const openConnection = useCallback(() => {
     const reducedMotion = personalization.reducedMotion || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     document.getElementById("device-connection")?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
@@ -439,7 +457,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
         // 真实串口默认保持低流量；用户可在工作台或诊断页开启遥测。
         setTelemetryEnabled(false);
       }
-      setPage("tuning");
+      setPage(isBluetoothConnection(snapshot) ? "control" : "tuning");
     } catch (reason) {
       setConnection(deviceGateway.connection);
       if (deviceGateway.connection.mode === "disconnected") {
@@ -656,7 +674,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
           </div>
         </header>
 
-        <ConnectionModal connection={connection} ports={ports} loading={connectionBusy || firmwareBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onConnect={(config) => { if (!firmwareBusy) void connect(config); }} onDisconnect={() => void disconnect()} />
+        <ConnectionModal connection={connection} ports={ports} bluetoothDevices={bluetoothDevices} loading={connectionBusy || firmwareBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onScanBluetooth={() => void scanBluetooth()} onConnect={(config) => { if (!firmwareBusy) void connect(config); }} onDisconnect={() => void disconnect()} />
 
         {startupError && (
           <section className="startup-danger-banner" role="alert">
@@ -678,8 +696,9 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
           )}
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
           {page === "kinematics" && <KinematicsPage />}
+          {page === "control" && !remote && <ControlPage commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
           {firmwareVisited && <div hidden={page !== "firmware"}><FirmwarePage product="wl1" connected={connected} connectionBusy={connectionBusy || !startupReady} onBusyChange={setFirmwareBusy} /></div>}
-          {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || connectionBusy} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
+          {page === "tuning" && <TuningPage remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || connectionBusy} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
             <section className="workbench-telemetry glass-card" aria-label="实时反馈">
               <div className="workbench-telemetry__heading"><h2>实时反馈</h2><button className="text-button" type="button" disabled={!connected || connectionBusy || telemetryBusy || parameterSending} onClick={() => {
                 setTelemetryBusy(true); setTelemetryError(null);

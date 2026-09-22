@@ -1,14 +1,14 @@
 use std::time::Duration;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::gamebox::{GameBoxSnapshot, GameBoxState};
 use crate::mifare::CardDump;
 use crate::nfc::{NfcSnapshot, NfcState, ReadOptions, WriteOptions, WriteReport};
 use crate::state::AppState;
 use crate::types::{
-    ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget, DeviceCapabilities,
-    MotionTargetRequest, SerialConfig, SerialPortOption,
+    BluetoothDeviceOption, ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget,
+    DeviceCapabilities, MotionTargetRequest, SerialConfig, SerialPortOption,
 };
 
 /// Upper bound for a whole-card operation. A full read of a 4K card whose keys
@@ -71,24 +71,45 @@ fn ensure_serial_port_available(port_name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn connect_device(
+pub async fn scan_bluetooth_devices(
+    bluetooth: State<'_, crate::bluetooth::BluetoothState>,
+) -> Result<Vec<BluetoothDeviceOption>, String> {
+    bluetooth.scan().await
+}
+
+#[tauri::command]
+pub async fn connect_device(
     app: AppHandle,
-    firmware: State<'_, crate::firmware::FirmwareState>,
-    state: State<'_, AppState>,
-    gamebox: State<'_, GameBoxState>,
-    lifecycle: State<'_, ProductSessionLifecycle>,
     config: SerialConfig,
 ) -> Result<ConnectionSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || connect_device_blocking(&app, config))
+        .await
+        .map_err(|error| format!("设备连接任务中断: {error}"))?
+}
+
+fn connect_device_blocking(
+    app: &AppHandle,
+    config: SerialConfig,
+) -> Result<ConnectionSnapshot, String> {
+    let firmware = app.state::<crate::firmware::FirmwareState>();
+    let state = app.state::<AppState>();
+    let gamebox = app.state::<GameBoxState>();
+    let nfc = app.state::<NfcState>();
+    let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
     firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
             gamebox.disconnect(None)?;
-            state.connect_mock(app)
+            nfc.disconnect(None)?;
+            state.connect_mock(app.clone())
         }
         ConnectionRequestMode::Serial => {
-            if config.baud_rate != 115_200 {
-                return Err("WL1 Legacy 固件当前只验证了 115200 baud".into());
+            if !matches!(config.baud_rate, 9_600 | 115_200)
+                || (config.connection_target == ConnectionTarget::Remote
+                    && config.baud_rate != 115_200)
+            {
+                return Err("小车支持 9600 / 115200 baud；遥控器桥接固定为 115200 baud".into());
             }
             let port_name = config
                 .port_name
@@ -98,26 +119,44 @@ pub fn connect_device(
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
             gamebox.disconnect(None)?;
-            state.connect_serial(
-                app,
-                port_name,
-                config.baud_rate,
+            nfc.disconnect(None)?;
+            state.connect_serial(app.clone(), port_name, &config)
+        }
+        ConnectionRequestMode::Ble => {
+            if config.connection_target != ConnectionTarget::Robot {
+                return Err("蓝牙 BLE 只支持直连小车".into());
+            }
+            let id = config
+                .ble_device_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .ok_or("请扫描并选择蓝牙设备")?;
+            gamebox.disconnect(None)?;
+            nfc.disconnect(None)?;
+            state.connect_ble(
+                app.clone(),
+                &app.state::<crate::bluetooth::BluetoothState>(),
+                id,
                 config.allow_unsafe_writes,
-                config.connection_target,
             )
         }
     }
 }
 
 #[tauri::command]
-pub fn disconnect_device(
-    state: State<'_, AppState>,
-    lifecycle: State<'_, ProductSessionLifecycle>,
+pub async fn disconnect_device(
+    app: AppHandle,
     expected_session_id: Option<u64>,
 ) -> Result<ConnectionSnapshot, String> {
-    let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
-    state.disconnect(expected_session_id)?;
-    state.snapshot()
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<ProductSessionLifecycle>();
+        let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        let state = app.state::<AppState>();
+        state.disconnect(expected_session_id)?;
+        state.snapshot()
+    })
+    .await
+    .map_err(|error| format!("设备断开任务中断: {error}"))?
 }
 
 #[tauri::command]
@@ -235,34 +274,46 @@ pub async fn nfc_write_card(
 }
 
 #[tauri::command]
-pub fn send_text_command(
+pub async fn send_text_command(
     app: AppHandle,
-    state: State<'_, AppState>,
     command: String,
     expected_session_id: u64,
 ) -> Result<(), String> {
-    state.send_command(&app, &command, expected_session_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AppState>()
+            .send_command(&app, &command, expected_session_id)
+    })
+    .await
+    .map_err(|error| format!("命令发送任务中断: {error}"))?
 }
 
 #[tauri::command]
-pub fn send_motion_target(
+pub async fn send_motion_target(
     app: AppHandle,
-    state: State<'_, AppState>,
     target: MotionTargetRequest,
     expected_session_id: u64,
 ) -> Result<(), String> {
-    state.send_motion(&app, &target, expected_session_id)
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AppState>()
+            .send_motion(&app, &target, expected_session_id)
+    })
+    .await
+    .map_err(|error| format!("运动发送任务中断: {error}"))?
 }
 
 #[tauri::command]
-pub fn set_telemetry(
+pub async fn set_telemetry(
     app: AppHandle,
-    state: State<'_, AppState>,
     enabled: bool,
     expected_session_id: u64,
 ) -> Result<ConnectionSnapshot, String> {
-    state.set_telemetry(&app, enabled, expected_session_id)?;
-    state.snapshot()
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.set_telemetry(&app, enabled, expected_session_id)?;
+        state.snapshot()
+    })
+    .await
+    .map_err(|error| format!("遥测切换任务中断: {error}"))?
 }
 
 #[tauri::command]

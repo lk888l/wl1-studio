@@ -35,6 +35,7 @@
     "active": true,
     "useLocalToolsDir": true,
     "targets": "all",
+    "linux": { "deb": { "depends": ["libdbus-1-3", "bluez"] } },
     "category": "Utility",
     "shortDescription": "可扩展的机器人设备控制与诊断工具",
     "longDescription": "多产品机器人桌面上位机，当前提供 WL1 轮腿小车的实时遥测、PID 调参、运动控制、标定与诊断工作台。",

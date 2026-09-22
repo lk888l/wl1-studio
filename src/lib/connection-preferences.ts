@@ -1,10 +1,12 @@
-import type { ConnectionTarget, SerialPortOption } from "../types";
+import type { ConnectionChoice, SerialPortOption } from "../types";
 
 const CONNECTION_KEY = "wl1-studio.connection.v1";
 
 export interface ConnectionPreferences {
-  target: ConnectionTarget;
+  target: Exclude<ConnectionChoice, "mock">;
   portName: string;
+  baudRate: 9600 | 115200;
+  bleDeviceId: string;
 }
 
 export function sanitizeConnectionPreferences(value: unknown): ConnectionPreferences {
@@ -12,10 +14,12 @@ export function sanitizeConnectionPreferences(value: unknown): ConnectionPrefere
     ? value as Record<string, unknown>
     : {};
   return {
-    target: candidate.target === "remote" ? "remote" : "robot",
+    target: candidate.target === "remote" || candidate.target === "ble" ? candidate.target : "robot",
     portName: typeof candidate.portName === "string" && candidate.portName.length <= 256
       ? candidate.portName.trim()
       : "",
+    baudRate: candidate.baudRate === 9600 ? 9600 : 115200,
+    bleDeviceId: typeof candidate.bleDeviceId === "string" && candidate.bleDeviceId.length <= 256 ? candidate.bleDeviceId : "",
   };
 }
 
@@ -23,7 +27,7 @@ export function loadConnectionPreferences(): ConnectionPreferences {
   try {
     return sanitizeConnectionPreferences(JSON.parse(localStorage.getItem(CONNECTION_KEY) ?? "{}"));
   } catch {
-    return { target: "robot", portName: "" };
+    return sanitizeConnectionPreferences(null);
   }
 }
 

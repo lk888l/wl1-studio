@@ -97,3 +97,59 @@ describe("遥控器网关能力边界", () => {
     await expect(gateway.sendTextCommand("anglebias 12", 1)).rejects.toThrow("只读");
   });
 });
+
+describe("蓝牙设备会话", () => {
+  const config = { mode: "ble", bleDeviceId: "0:zx-d30", baudRate: 9600, allowUnsafeWrites: true } as const;
+
+  it("原生扫描独立于串口枚举，浏览器不会调用蓝牙 IPC", async () => {
+    const gateway = new DeviceGateway();
+    invoke.mockResolvedValueOnce([{ id: "0:zx-d30", name: "WL1_BLE_TEST", address: "00:00:00:00:00:01", rssi: -52 }]);
+    expect(await gateway.scanBluetoothDevices()).toHaveLength(1);
+    expect(invoke).toHaveBeenLastCalledWith("scan_bluetooth_devices");
+    vi.stubGlobal("window", {});
+    await expect(gateway.scanBluetoothDevices()).rejects.toThrow("桌面端");
+  });
+
+  it("BLE 使用独立模式与扫描 ID，不报告虚假的无线波特率", async () => {
+    backendSnapshot = { ...backendSnapshot, mode: "ble", connectionTarget: "robot", label: "WL1_BLE_TEST · BLE", baudRate: undefined };
+    const gateway = new DeviceGateway();
+    const snapshot = await gateway.connect(config);
+    expect(snapshot).toMatchObject({ mode: "ble", baudRate: undefined, writesUnlocked: true, telemetryEnabled: false });
+    expect(invoke).toHaveBeenCalledWith("connect_device", { config: { ...config, connectionTarget: "robot", portName: undefined } });
+    expect(invoke).not.toHaveBeenCalledWith("set_telemetry", expect.anything());
+    const target = { turn: 10, velocity: -18, roll: 0, height: 61.5 };
+    await gateway.sendMotionTarget(target, 1);
+    expect(invoke).toHaveBeenLastCalledWith("send_motion_target", { target, expectedSessionId: 1 });
+  });
+
+  it("蓝牙连接中的断连事件锁定旧会话，重连不补发目标", async () => {
+    backendSnapshot = { ...backendSnapshot, mode: "ble", connectionTarget: "robot" };
+    const gateway = new DeviceGateway();
+    await gateway.connect(config);
+    handlers.get("wl1://disconnected")?.({ payload: { sessionId: 1, timestamp: 10, reason: "蓝牙设备已断开" } });
+    const target = { turn: 0, velocity: -18, roll: 0, height: 61.5 };
+    await expect(gateway.sendMotionTarget(target, 1)).rejects.toThrow("请先连接");
+    backendSnapshot = { ...backendSnapshot, sessionId: 2 };
+    invoke.mockClear();
+    await gateway.connect(config);
+    await expect(gateway.sendMotionTarget(target, 1)).rejects.toThrow("会话已变化");
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(["disconnect_device", "connect_device"]);
+  });
+
+  it("BLE 建立阶段断开不会返回已连接，只读连接仍不能运动", async () => {
+    const gateway = new DeviceGateway();
+    invoke.mockImplementation(async (name: string) => {
+      if (name === "disconnect_device") return disconnected;
+      if (name === "connect_device") {
+        handlers.get("wl1://disconnected")?.({ payload: { sessionId: 3, timestamp: 10, reason: "订阅后立即断开" } });
+        return { ...backendSnapshot, mode: "ble", sessionId: 3 };
+      }
+      return undefined;
+    });
+    await expect(gateway.connect(config)).rejects.toThrow("订阅后立即断开");
+    expect(gateway.connection.mode).toBe("disconnected");
+    invoke.mockImplementation(async (name: string) => name === "disconnect_device" ? disconnected : { ...backendSnapshot, mode: "ble", connectionTarget: "robot", writesUnlocked: false });
+    await gateway.connect({ ...config, allowUnsafeWrites: false });
+    await expect(gateway.sendMotionTarget({ turn: 0, velocity: 0, roll: 0, height: 60 })).rejects.toThrow("只读");
+  });
+});

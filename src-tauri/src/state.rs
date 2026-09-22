@@ -13,7 +13,7 @@ use crate::protocol::{
 use crate::transport::{SerialTransport, Transport};
 use crate::types::{
     ConnectionSnapshot, ConnectionTarget, ConsoleEvent, DisconnectedEvent, MotionTargetRequest,
-    TelemetryFrame,
+    SerialConfig, TelemetryFrame,
 };
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -52,9 +52,7 @@ impl AppState {
         &self,
         app: AppHandle,
         port_name: &str,
-        baud_rate: u32,
-        writes_unlocked: bool,
-        connection_target: ConnectionTarget,
+        config: &SerialConfig,
     ) -> Result<ConnectionSnapshot, String> {
         let _lifecycle = self
             .lifecycle
@@ -63,15 +61,42 @@ impl AppState {
         self.disconnect_current(None)?;
         let transport = Box::new(SerialTransport::open(
             port_name,
-            baud_rate,
-            connection_target,
+            config.baud_rate,
+            config.connection_target,
         )?);
-        let session = DeviceSession::from_serial(
+        let session = DeviceSession::from_transport(
             app,
             transport,
-            baud_rate,
+            "serial",
+            Some(config.baud_rate),
+            config.allow_unsafe_writes,
+            config.connection_target,
+        )?;
+        let snapshot = session.snapshot();
+        *self.session.lock().map_err(|_| "设备会话状态已损坏")? = Some(session);
+        Ok(snapshot)
+    }
+
+    pub fn connect_ble(
+        &self,
+        app: AppHandle,
+        bluetooth: &crate::bluetooth::BluetoothState,
+        device_id: &str,
+        writes_unlocked: bool,
+    ) -> Result<ConnectionSnapshot, String> {
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "设备会话生命周期锁已损坏")?;
+        self.disconnect_current(None)?;
+        let transport = Box::new(bluetooth.open(device_id)?);
+        let session = DeviceSession::from_transport(
+            app,
+            transport,
+            "ble",
+            None,
             writes_unlocked,
-            connection_target,
+            ConnectionTarget::Robot,
         )?;
         let snapshot = session.snapshot();
         *self.session.lock().map_err(|_| "设备会话状态已损坏")? = Some(session);
@@ -233,10 +258,11 @@ struct DeviceSession {
 }
 
 impl DeviceSession {
-    fn from_serial(
+    fn from_transport(
         app: AppHandle,
         transport: Box<dyn Transport>,
-        baud_rate: u32,
+        mode: &'static str,
+        baud_rate: Option<u32>,
         writes_unlocked: bool,
         connection_target: ConnectionTarget,
     ) -> Result<Self, String> {
@@ -258,7 +284,7 @@ impl DeviceSession {
         let thread_writer = Arc::clone(&writer);
         let thread_last_motion_height = Arc::clone(&last_motion_height);
         let reader_thread = thread::Builder::new()
-            .name("wl1-serial-reader".into())
+            .name("wl1-device-reader".into())
             .spawn(move || {
                 serial_reader_loop(
                     app,
@@ -277,10 +303,10 @@ impl DeviceSession {
             .map_err(|error| format!("无法启动串口读取任务: {error}"))?;
 
         Ok(Self {
-            mode: "serial",
+            mode,
             connection_target,
             label,
-            baud_rate: Some(baud_rate),
+            baud_rate,
             session_id,
             connected_at: unix_millis(),
             alive,
@@ -730,7 +756,7 @@ fn serial_reader_loop(
                         &writer,
                         &last_motion_height,
                         session_id,
-                        "串口接收超过 4096 字节仍无换行，帧边界已失步；设备会话已锁定".into(),
+                        "设备接收超过 4096 字节仍无换行，帧边界已失步；设备会话已锁定".into(),
                         connection_target,
                     );
                     break;
@@ -738,7 +764,7 @@ fn serial_reader_loop(
             }
             Err(error) if matches!(error.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {}
             Err(error) => {
-                let reason = format!("串口读取已停止: {error}");
+                let reason = format!("设备读取已停止: {error}");
                 fail_serial_reader(
                     &app,
                     &alive,

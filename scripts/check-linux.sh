@@ -49,7 +49,7 @@ for command_name in node npm rustc cargo pkg-config curl sha256sum; do
   fi
 done
 
-for module_name in webkit2gtk-4.1 gtk+-3.0 librsvg-2.0; do
+for module_name in webkit2gtk-4.1 gtk+-3.0 librsvg-2.0 dbus-1; do
   if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists "${module_name}"; then
     ok "pkg-config module: ${module_name} $(pkg-config --modversion "${module_name}")"
   else

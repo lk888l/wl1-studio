@@ -20,8 +20,18 @@ describe("连接偏好与串口选择", () => {
   });
 
   it("损坏的偏好回退到小车并丢弃无效串口", () => {
-    expect(sanitizeConnectionPreferences(null)).toEqual({ target: "robot", portName: "" });
-    expect(sanitizeConnectionPreferences({ target: "unknown", portName: {} })).toEqual({ target: "robot", portName: "" });
-    expect(sanitizeConnectionPreferences({ target: "remote", portName: " COM7 " })).toEqual({ target: "remote", portName: "COM7" });
+    const defaults = { target: "robot", portName: "", baudRate: 115200, bleDeviceId: "" };
+    expect(sanitizeConnectionPreferences(null)).toEqual(defaults);
+    expect(sanitizeConnectionPreferences({ target: "unknown", portName: {} })).toEqual(defaults);
+    expect(sanitizeConnectionPreferences({ target: "remote", portName: " COM7 " })).toEqual({ ...defaults, target: "remote", portName: "COM7" });
+  });
+
+  it("保存 BLE 选择但不恢复写入许可，拒绝过时或损坏的连接配置", () => {
+    expect(sanitizeConnectionPreferences({ target: "ble", bleDeviceId: "0:device", baudRate: 9600, allowUnsafeWrites: true })).toEqual({
+      target: "ble", bleDeviceId: "0:device", baudRate: 9600, portName: "",
+    });
+    expect(sanitizeConnectionPreferences({ target: "spp", bleDeviceId: {}, baudRate: 42 })).toEqual({
+      target: "robot", bleDeviceId: "", baudRate: 115200, portName: "",
+    });
   });
 });

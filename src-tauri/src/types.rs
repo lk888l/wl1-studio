@@ -19,6 +19,7 @@ pub struct SerialConfig {
     #[serde(default)]
     pub connection_target: ConnectionTarget,
     pub port_name: Option<String>,
+    pub ble_device_id: Option<String>,
     #[serde(default = "default_baud_rate")]
     pub baud_rate: u32,
     /// Explicit operator acknowledgement for motion/parameter writes. When
@@ -36,6 +37,16 @@ const fn default_baud_rate() -> u32 {
 pub enum ConnectionRequestMode {
     Mock,
     Serial,
+    Ble,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BluetoothDeviceOption {
+    pub id: String,
+    pub name: String,
+    pub address: String,
+    pub rssi: Option<i16>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]

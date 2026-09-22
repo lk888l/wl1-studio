@@ -7,8 +7,16 @@ export type PageId =
   | "firmware"
   | "diagnostics";
 
-export type ConnectionMode = "disconnected" | "mock" | "serial";
+export type ConnectionMode = "disconnected" | "mock" | "serial" | "ble";
 export type ConnectionTarget = "robot" | "remote";
+export type ConnectionChoice = ConnectionTarget | "ble" | "mock";
+
+export interface BluetoothDeviceOption {
+  id: string;
+  name: string;
+  address: string;
+  rssi?: number | null;
+}
 
 export interface SerialPortOption {
   name: string;
@@ -21,9 +29,10 @@ export interface SerialPortOption {
 }
 
 export interface SerialConfig {
-  mode: "mock" | "serial";
+  mode: "mock" | "serial" | "ble";
   connectionTarget?: ConnectionTarget;
   portName?: string;
+  bleDeviceId?: string;
   baudRate: number;
   allowUnsafeWrites: boolean;
 }

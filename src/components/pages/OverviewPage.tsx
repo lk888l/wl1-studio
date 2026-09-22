@@ -76,7 +76,7 @@ export function OverviewPage({
         <article className="metric-card glass-card">
           <div className="metric-icon is-blue"><Activity size={20} /></div>
           <div><span>IMU 合加速度</span><strong>{latestImu?.accelerationNormG?.toFixed(3) ?? "--"}<small> g</small></strong></div>
-          <em>{latestImu?.accelerationTrusted === true ? "加速度可信" : latestImu?.accelerationTrusted === false ? "动态或异常，融合已降权" : imuFresh && connection.mode === "serial" ? "HEAD 基线未上报" : connected ? "IMU 超过 600 ms 未更新" : "等待连接"}</em>
+          <em>{latestImu?.accelerationTrusted === true ? "加速度可信" : latestImu?.accelerationTrusted === false ? "动态或异常，融合已降权" : imuFresh && connection.mode !== "mock" ? "固件未上报" : connected ? "IMU 超过 600 ms 未更新" : "等待连接"}</em>
         </article>
         <article className="metric-card glass-card">
           <div className="metric-icon is-mint"><Bolt size={20} /></div>
@@ -91,7 +91,7 @@ export function OverviewPage({
         <article className="metric-card glass-card">
           <div className="metric-icon is-coral"><RadioTower size={20} /></div>
           <div><span>链路质量</span><strong>{latest?.linkQuality?.toFixed(0) ?? "--"}<small> %</small></strong></div>
-          <em>{connection.mode === "mock" ? "Mock 链路" : connection.mode === "serial" ? "当前固件未提供质量指标" : "等待连接"}</em>
+          <em>{connection.mode === "mock" ? "Mock 链路" : connected ? "当前固件未提供质量指标" : "等待连接"}</em>
         </article>
       </section>
 

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  BluetoothDeviceOption,
   ConnectionSnapshot,
   ConsoleEntry,
   DeviceEvent,
@@ -134,6 +135,11 @@ export class DeviceGateway {
     return result.map((port) => this.normalizePort(port));
   }
 
+  async scanBluetoothDevices(): Promise<BluetoothDeviceOption[]> {
+    if (!isTauriRuntime()) throw new Error("蓝牙连接需要在桌面端运行。");
+    return invoke<BluetoothDeviceOption[]>("scan_bluetooth_devices");
+  }
+
   async connect(config: SerialConfig): Promise<ConnectionSnapshot> {
     const tauri = isTauriRuntime();
     await this.disconnect(tauri);
@@ -159,9 +165,10 @@ export class DeviceGateway {
     }
 
     if (!tauri) {
-      throw new Error("当前是浏览器预览，请选择 Mock 模式；真实串口需要在 Tauri 桌面端运行。");
+      throw new Error("当前是浏览器预览，请选择 Mock 模式；真实串口或蓝牙需要在桌面端运行。");
     }
     if (config.mode === "serial" && !config.portName) throw new Error("请选择串口");
+    if (config.mode === "ble" && !config.bleDeviceId) throw new Error("请扫描并选择蓝牙设备");
     await this.installTauriEvents();
     this.connecting = true;
     try {
@@ -170,6 +177,7 @@ export class DeviceGateway {
           mode: config.mode,
           connectionTarget: config.mode === "serial" ? config.connectionTarget ?? "robot" : "robot",
           portName: config.portName,
+          ...(config.mode === "ble" ? { bleDeviceId: config.bleDeviceId } : {}),
           baudRate: config.baudRate,
           allowUnsafeWrites: config.mode === "mock" || config.allowUnsafeWrites,
         },
@@ -181,7 +189,7 @@ export class DeviceGateway {
         label: backendSnapshot.label || (config.mode === "mock" ? "WL1-MOCK-01" : config.portName ?? "WL1"),
         sessionId: backendSnapshot.sessionId,
         connectedAt: backendSnapshot.connectedAt ?? Date.now(),
-        baudRate: backendSnapshot.baudRate ?? config.baudRate,
+        baudRate: config.mode === "ble" ? undefined : backendSnapshot.baudRate ?? config.baudRate,
         telemetryEnabled: backendSnapshot.telemetryEnabled ?? false,
         writesUnlocked: backendSnapshot.writesUnlocked ?? (config.mode === "mock" || config.allowUnsafeWrites),
       };
@@ -192,7 +200,7 @@ export class DeviceGateway {
           await invoke("disconnect_device", { expectedSessionId: sessionId }).catch(() => undefined);
         }
         this.snapshot = { mode: "disconnected", label: "未连接", telemetryEnabled: false, writesUnlocked: false };
-        throw new Error(earlyDisconnect?.reason ?? "设备在连接建立阶段已中断，请检查串口后重试");
+        throw new Error(earlyDisconnect?.reason ?? "设备在连接建立阶段已中断，请检查设备后重试");
       }
       return this.connection;
     } finally {
