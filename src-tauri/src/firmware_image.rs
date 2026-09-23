@@ -1,5 +1,6 @@
-//! Parse and bound every byte before a probe is opened. No filesystem paths or
-//! caller-provided target descriptions cross the firmware command boundary.
+//! Parse files before opening a probe. Product bounds are checked offline;
+//! automatic targets also check every segment against the live Flash capacity.
+//! No filesystem paths or caller-provided target descriptions cross the boundary.
 use object::read::elf::{FileHeader, ProgramHeader};
 use object::{elf, LittleEndian};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,8 @@ pub const MAX_FILE_SIZE: usize = 16 * 1024 * 1024;
 pub enum Chip {
     Stm32f411ceu,
     Stm32f103c8t6,
+    Stm32f103cbt6,
+    Stm32g431cbu6,
 }
 
 impl Chip {
@@ -20,6 +23,8 @@ impl Chip {
         match self {
             Self::Stm32f411ceu => "STM32F411CEU",
             Self::Stm32f103c8t6 => "STM32F103C8T6",
+            Self::Stm32f103cbt6 => "STM32F103CBT6",
+            Self::Stm32g431cbu6 => "STM32G431CBU6",
         }
     }
 
@@ -27,12 +32,13 @@ impl Chip {
         match self {
             Self::Stm32f411ceu => 512 * 1024,
             Self::Stm32f103c8t6 => 64 * 1024,
+            Self::Stm32f103cbt6 | Self::Stm32g431cbu6 => 128 * 1024,
         }
     }
 
     pub fn program_size(self) -> usize {
         match self {
-            Self::Stm32f411ceu => self.size(),
+            Self::Stm32f411ceu | Self::Stm32f103cbt6 | Self::Stm32g431cbu6 => self.size(),
             // GameBox reserves the last two 1-KiB pages for persistent settings.
             Self::Stm32f103c8t6 => 62 * 1024,
         }
@@ -42,28 +48,65 @@ impl Chip {
         match self {
             Self::Stm32f411ceu => "STM32F411CEUx",
             Self::Stm32f103c8t6 => "STM32F103C8Tx",
+            Self::Stm32f103cbt6 => "STM32F103CBTx",
+            Self::Stm32g431cbu6 => "STM32G431CBUx",
         }
     }
 
     pub fn device_id(self) -> u32 {
         match self {
             Self::Stm32f411ceu => 0x431,
-            Self::Stm32f103c8t6 => 0x410,
+            Self::Stm32f103c8t6 | Self::Stm32f103cbt6 => 0x410,
+            Self::Stm32g431cbu6 => 0x468,
         }
     }
 
     pub fn size_register(self) -> u64 {
         match self {
             Self::Stm32f411ceu => 0x1fff_7a22,
-            Self::Stm32f103c8t6 => 0x1fff_f7e0,
+            Self::Stm32f103c8t6 | Self::Stm32f103cbt6 => 0x1fff_f7e0,
+            Self::Stm32g431cbu6 => 0x1fff_75e0,
         }
     }
 
     pub fn uid_register(self) -> u64 {
         match self {
             Self::Stm32f411ceu => 0x1fff_7a10,
-            Self::Stm32f103c8t6 => 0x1fff_f7e8,
+            Self::Stm32f103c8t6 | Self::Stm32f103cbt6 => 0x1fff_f7e8,
+            Self::Stm32g431cbu6 => 0x1fff_7590,
         }
+    }
+}
+
+/// Product profiles retain their fixed layout. A standalone SWD probe resolves
+/// its Flash bounds from the connected target instead of a product profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutomaticTarget {
+    Auto,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum TargetSelection {
+    Fixed(Chip),
+    Automatic(AutomaticTarget),
+}
+
+impl TargetSelection {
+    pub const AUTO: Self = Self::Automatic(AutomaticTarget::Auto);
+
+    pub fn fixed(self) -> Option<Chip> {
+        match self {
+            Self::Fixed(chip) => Some(chip),
+            Self::Automatic(_) => None,
+        }
+    }
+}
+
+impl From<Chip> for TargetSelection {
+    fn from(chip: Chip) -> Self {
+        Self::Fixed(chip)
     }
 }
 
@@ -81,7 +124,7 @@ pub struct ImageRequest {
     pub format: ImageFormat,
     pub data: Vec<u8>,
     pub base_address: u64,
-    pub chip: Chip,
+    pub chip: TargetSelection,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -109,17 +152,40 @@ pub fn sha256(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
 
-fn validate_range(address: u64, length: usize, chip: Chip) -> Result<(), String> {
+fn validate_range(address: u64, length: usize, selection: TargetSelection) -> Result<(), String> {
+    // Before discovery, only parse/validate the file and the STM32 main-Flash
+    // address window. The real capacity is checked again on the live session.
+    let chip = selection.fixed();
+    let capacity = chip.map(Chip::size).unwrap_or(MAX_FILE_SIZE);
     let end = address.checked_add(length as u64).ok_or("固件地址溢出")?;
-    if address < FLASH_START || end > FLASH_START + chip.size() as u64 {
+    if address < FLASH_START || end > FLASH_START + capacity as u64 {
         return Err(format!(
-            "固件范围 {address:#010X}..{end:#010X} 超出产品目标芯片主 Flash；不允许写入 RAM、OTP 或选项字节"
+            "固件范围 {address:#010X}..{end:#010X} 超出主 Flash 地址范围；不允许写入 RAM、OTP 或选项字节"
         ));
     }
-    if end > FLASH_START + chip.program_size() as u64 {
+    if chip.is_some_and(|chip| end > FLASH_START + chip.program_size() as u64) {
         return Err(
             "固件覆盖游戏机设置保留区 0x0800F800–0x0800FFFF；更新只能写入前 62 KiB 应用区".into(),
         );
+    }
+    Ok(())
+}
+
+pub fn validate_detected_capacity(image: &PreparedImage, flash_size: usize) -> Result<(), String> {
+    if flash_size == 0 || flash_size > MAX_FILE_SIZE {
+        return Err("芯片 Flash 容量无效，请重新连接并识别".into());
+    }
+    for (address, data) in &image.chunks {
+        let end = address
+            .checked_add(data.len() as u64)
+            .ok_or("固件地址溢出")?;
+        if *address < FLASH_START || end > FLASH_START + flash_size as u64 {
+            return Err(format!(
+                "固件范围 {address:#010X}..{end:#010X} 超出实测 {} KiB Flash（结束地址 {:#010X}）；请使用适合此容量的固件",
+                flash_size / 1024,
+                FLASH_START + flash_size as u64 - 1
+            ));
+        }
     }
     Ok(())
 }
@@ -240,7 +306,7 @@ mod tests {
             format,
             data,
             base_address,
-            chip: Chip::Stm32f411ceu,
+            chip: Chip::Stm32f411ceu.into(),
         }
     }
 
@@ -259,9 +325,67 @@ mod tests {
     }
 
     #[test]
+    fn swd_128k_targets_accept_full_backups_and_reject_system_memory() {
+        for chip in [Chip::Stm32f103cbt6, Chip::Stm32g431cbu6] {
+            let mut image = request(ImageFormat::Bin, vec![0xa5; 128 * 1024], FLASH_START);
+            image.chip = chip.into();
+            assert!(prepare_image(&image).is_ok());
+            image.data.push(0);
+            assert!(prepare_image(&image).is_err());
+            image.data = vec![1];
+            image.base_address = FLASH_START + 128 * 1024 - 1;
+            assert!(prepare_image(&image).is_ok());
+            image.base_address += 1;
+            assert!(prepare_image(&image).is_err());
+            image.base_address = 0x1fff_7800;
+            assert!(prepare_image(&image).is_err());
+        }
+    }
+
+    #[test]
+    fn automatic_swd_uses_live_capacity_and_allows_full_64k_without_gamebox_policy() {
+        let mut image = request(ImageFormat::Bin, vec![0xa5; 64 * 1024], FLASH_START);
+        image.chip = TargetSelection::AUTO;
+        let prepared = prepare_image(&image).unwrap();
+        assert!(validate_detected_capacity(&prepared, 64 * 1024).is_ok());
+        image.data.push(0);
+        // Offline parsing cannot guess capacity. A live 64-KiB target rejects
+        // the extra byte before any loader or erase operation can start.
+        let prepared = prepare_image(&image).unwrap();
+        let error = validate_detected_capacity(&prepared, 64 * 1024).unwrap_err();
+        assert!(error.contains("实测 64 KiB"));
+        assert!(validate_detected_capacity(&prepared, 128 * 1024).is_ok());
+        assert!(validate_detected_capacity(&prepared, 0).is_err());
+        image.data = vec![0x55];
+        image.base_address = FLASH_START + 64 * 1024 - 1;
+        assert!(validate_detected_capacity(&prepare_image(&image).unwrap(), 64 * 1024).is_ok());
+        image.base_address += 1;
+        assert!(validate_detected_capacity(&prepare_image(&image).unwrap(), 64 * 1024).is_err());
+        for address in [0x1fff_7800, 0x2000_0000, u64::MAX] {
+            image.base_address = address;
+            assert!(prepare_image(&image).is_err());
+        }
+    }
+
+    #[test]
+    fn auto_target_has_an_explicit_ipc_value_without_changing_fixed_profiles() {
+        assert_eq!(
+            serde_json::from_str::<TargetSelection>("\"auto\"").unwrap(),
+            TargetSelection::AUTO
+        );
+        assert_eq!(
+            serde_json::to_string(&TargetSelection::AUTO).unwrap(),
+            "\"auto\""
+        );
+        let fixed = serde_json::from_str::<TargetSelection>("\"stm32f103c8t6\"").unwrap();
+        assert_eq!(fixed.fixed(), Some(Chip::Stm32f103c8t6));
+        assert!(serde_json::from_str::<TargetSelection>("\"unknown-chip\"").is_err());
+    }
+
+    #[test]
     fn gamebox_bin_preserves_settings_and_rejects_full_flash_backups_as_updates() {
         let mut image = request(ImageFormat::Bin, vec![0x5a; 62 * 1024], FLASH_START);
-        image.chip = Chip::Stm32f103c8t6;
+        image.chip = Chip::Stm32f103c8t6.into();
         assert!(prepare_image(&image).is_ok());
         image.data.push(0);
         assert!(prepare_image(&image).err().unwrap().contains("设置保留区"));
@@ -356,9 +480,30 @@ mod tests {
                 },
                 ihex::Record::EndOfFile,
             ]);
-            image.chip = Chip::Stm32f103c8t6;
+            image.chip = Chip::Stm32f103c8t6.into();
             assert_eq!(prepare_image(&image).is_ok(), accepted);
         }
+    }
+
+    #[test]
+    fn automatic_hex_checks_sparse_segments_against_measured_flash_end() {
+        let mut image = hex(&[
+            ihex::Record::ExtendedLinearAddress(0x0800),
+            ihex::Record::Data {
+                offset: 0,
+                value: vec![1, 2, 3, 4],
+            },
+            ihex::Record::ExtendedLinearAddress(0x0801),
+            ihex::Record::Data {
+                offset: 0,
+                value: vec![0x42],
+            },
+            ihex::Record::EndOfFile,
+        ]);
+        image.chip = TargetSelection::AUTO;
+        let prepared = prepare_image(&image).unwrap();
+        assert!(validate_detected_capacity(&prepared, 64 * 1024).is_err());
+        assert!(validate_detected_capacity(&prepared, 128 * 1024).is_ok());
     }
 
     #[test]
@@ -397,7 +542,7 @@ mod tests {
         let image = prepare_image(&request(ImageFormat::Elf, bytes.clone(), FLASH_START)).unwrap();
         assert_eq!(image.chunks, vec![(FLASH_START + 0x4000, vec![1, 2, 3, 4])]);
         let mut gamebox_image = request(ImageFormat::Elf, bytes.clone(), FLASH_START);
-        gamebox_image.chip = Chip::Stm32f103c8t6;
+        gamebox_image.chip = Chip::Stm32f103c8t6.into();
         assert!(prepare_image(&gamebox_image).is_ok());
         gamebox_image.data[64..68].copy_from_slice(&0x0800_f800_u32.to_le_bytes());
         assert!(prepare_image(&gamebox_image)

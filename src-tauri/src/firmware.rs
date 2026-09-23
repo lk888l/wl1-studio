@@ -1,11 +1,15 @@
-//! WL1 and GameBox ST-Link/SWD service. Jobs own USB on a blocking worker and
+//! ST-Link and CMSIS-DAP/SWD service. Jobs own USB on a blocking worker and
 //! reserve the product lifecycle before attaching. No probe-rs CLI is spawned.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use probe_rs::architecture::arm::{sequences::DefaultArmSequence, FullyQualifiedApAddress};
 use probe_rs::flashing::{self, DownloadOptions, FlashProgress, ProgressEvent, ProgressOperation};
 use probe_rs::probe::{
-    list::Accessibility, stlink::StLinkFactory, DebugProbeInfo, ProbeFactory, WireProtocol,
+    cmsisdap::CmsisDapFactory,
+    list::{Accessibility, ProbeListItem},
+    stlink::StLinkFactory,
+    DebugProbeInfo, Probe, ProbeFactory, WireProtocol,
 };
 use probe_rs::{MemoryInterface, Permissions, Session};
 use serde::{Deserialize, Serialize};
@@ -13,8 +17,10 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::commands::ProductSessionLifecycle;
 use crate::firmware_image::{
-    prepare_image, sha256, Chip, ImageRequest, ImageSummary, PreparedImage, FLASH_START,
+    prepare_image, sha256, validate_detected_capacity, Chip, ImageRequest, ImageSummary,
+    PreparedImage, TargetSelection, FLASH_START,
 };
+use crate::firmware_target::{self, ResolvedTarget};
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,7 +59,7 @@ impl FirmwareState {
         *status = FirmwareStatus {
             busy: true,
             stage: "connecting".into(),
-            message: "正在连接 ST-Link / SWD…".into(),
+            message: "正在连接烧录器 / SWD…".into(),
             completed: 0,
             total: None,
         };
@@ -100,21 +106,39 @@ fn probe_id(info: &DebugProbeInfo) -> String {
     )
 }
 
+fn list_probes() -> Vec<ProbeListItem> {
+    StLinkFactory
+        .list_probes()
+        .into_iter()
+        .chain(CmsisDapFactory.list_probes())
+        .collect()
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProbeConfig {
     pub probe_id: String,
-    pub chip: Chip,
+    pub chip: TargetSelection,
     pub speed_khz: u32,
     pub connect_under_reset: bool,
+    #[serde(default)]
+    pub expected_target: Option<TargetIdentity>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetIdentity {
+    pub device_id: u32,
+    pub flash_size: usize,
+    pub uid: String,
 }
 
 impl ProbeConfig {
     fn validate(&self) -> Result<(), String> {
         if self.probe_id.is_empty() || self.probe_id.len() > 256 {
-            return Err("请刷新并选择 ST-Link".into());
+            return Err("请刷新并选择 ST-Link 或 CMSIS-DAP 烧录器".into());
         }
-        if ![100, 400, 1000, 1800, 4000].contains(&self.speed_khz) {
+        if ![100, 250, 400, 1000, 1800, 4000].contains(&self.speed_khz) {
             return Err("SWD 频率不在支持的范围内".into());
         }
         Ok(())
@@ -125,6 +149,7 @@ impl ProbeConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ChipInfo {
     pub name: String,
+    pub target: String,
     pub device_id: u32,
     pub revision_id: u32,
     pub flash_start: u64,
@@ -165,29 +190,79 @@ fn check_identity(device_id: u32, size_kib: u16, chip: Chip) -> Result<(), Strin
     }
     if usize::from(size_kib) * 1024 != chip.size() {
         return Err(format!(
-            "芯片实测 Flash 为 {size_kib} KiB，与产品固定目标 {} 的 {} KiB 不一致；请检查所连接的设备",
-            chip.name(), chip.size() / 1024
+            "芯片实测 Flash 为 {size_kib} KiB，与所选目标 {} 的 {} KiB 不一致；请检查所连接的设备",
+            chip.name(),
+            chip.size() / 1024
         ));
     }
     Ok(())
+}
+
+fn discover_target(mut probe: Probe, under_reset: bool) -> Result<(Probe, ResolvedTarget), String> {
+    // Read the identification registers before selecting a package or capacity.
+    // No Flash loader, erase or unlock operation runs during this phase.
+    let attached = if under_reset {
+        probe.attach_to_unspecified_under_reset()
+    } else {
+        probe.attach_to_unspecified()
+    };
+    if let Err(error) = attached {
+        if under_reset {
+            let _ = probe.target_reset_deassert();
+        }
+        return Err(detailed_error("无法初始化 SWD 自动识别", error));
+    }
+    let mut interface = probe
+        .try_into_arm_debug_interface(DefaultArmSequence::create())
+        .map_err(|(mut probe, error)| {
+            if under_reset {
+                let _ = probe.target_reset_deassert();
+            }
+            detailed_error("无法连接 ARM 调试接口，请检查供电和 SWD 接线", error)
+        })?;
+    let detected = (|| {
+        let mut memory = interface
+            .memory_interface(&FullyQualifiedApAddress::v1_with_default_dp(0))
+            .map_err(|error| detailed_error("无法访问芯片识别寄存器", error))?;
+        let id = memory
+            .read_word_32(0xe004_2000)
+            .map_err(|error| detailed_error("无法读取芯片器件 ID", error))?;
+        let address = firmware_target::size_register(id)?;
+        let mut size = [0; 2];
+        memory
+            .read_8(address, &mut size)
+            .map_err(|error| detailed_error("无法读取芯片实际 Flash 容量", error))?;
+        firmware_target::resolve(id, u16::from_le_bytes(size))
+    })();
+    let mut probe = interface.close();
+    // Always release reset, including failed identification. The normal session
+    // attach below performs its own target-specific under-reset sequence.
+    if under_reset {
+        probe
+            .target_reset_deassert()
+            .map_err(|error| detailed_error("自动识别后释放复位失败", error))?;
+    }
+    probe
+        .detach()
+        .map_err(|error| detailed_error("结束自动识别连接失败", error))?;
+    Ok((probe, detected?))
 }
 
 fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
     config.validate()?;
     // Re-enumerate by identity, not list index. Duplicate clone serial numbers
     // are ambiguous and must never silently choose an arbitrary target.
-    let matches: Vec<_> = StLinkFactory
-        .list_probes()
+    let matches: Vec<_> = list_probes()
         .into_iter()
         .filter(|item| probe_id(&item.info) == config.probe_id)
         .collect();
     if matches.len() != 1 {
-        return Err("所选 ST-Link 已拔出或存在重复序列号；请只连接一个匹配探针后刷新".into());
+        return Err("所选烧录器已拔出或存在重复序列号；请只连接一个匹配探针后刷新。StickS3 需要保持 USB DAP 开启".into());
     }
     let mut probe = matches[0].info.open().map_err(|error| {
         format!(
-            "{}。请使用页面中的 USB 支持设置，并关闭占用探针的调试软件",
-            detailed_error("无法打开 ST-Link", error)
+            "{}。请检查 USB 权限，并关闭占用探针的 OpenOCD / IDE；StickS3 使用 CMSIS-DAP / WinUSB",
+            detailed_error("无法打开烧录器", error)
         )
     })?;
     probe
@@ -196,11 +271,16 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
     let speed_khz = probe
         .set_speed(config.speed_khz)
         .map_err(|error| detailed_error("无法设置 SWD 频率", error))?;
+    let (probe, resolved) = if let Some(chip) = config.chip.fixed() {
+        (probe, ResolvedTarget::fixed(chip))
+    } else {
+        discover_target(probe, config.connect_under_reset)?
+    };
     // Default permissions deliberately prohibit automatic RDP unlock/mass erase.
     let mut session = if config.connect_under_reset {
-        probe.attach_under_reset(config.chip.target(), Permissions::default())
+        probe.attach_under_reset(resolved.target, Permissions::default())
     } else {
-        probe.attach(config.chip.target(), Permissions::default())
+        probe.attach(resolved.target, Permissions::default())
     }.map_err(|error| format!("{}。检查供电、GND/SWDIO/SWCLK；可降低 SWD 频率或连接 NRST 后启用复位连接。读保护不会自动解除", detailed_error("无法连接芯片", error)))?;
     let mut core = session
         .core(0)
@@ -209,24 +289,44 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
         .read_word_32(0xe004_2000)
         .map_err(|error| detailed_error("无法读取芯片 ID", error))?;
     let mut size = [0; 2];
-    core.read_8(config.chip.size_register(), &mut size)
+    core.read_8(resolved.size_register, &mut size)
         .map_err(|error| detailed_error("无法读取 Flash 容量", error))?;
-    check_identity(id, u16::from_le_bytes(size), config.chip)?;
+    let flash_size = usize::from(u16::from_le_bytes(size)) * 1024;
+    if let Some(chip) = config.chip.fixed() {
+        check_identity(id, u16::from_le_bytes(size), chip)?;
+    } else if id & 0xfff != resolved.device_id || flash_size != resolved.flash_size {
+        return Err("连接期间芯片信息发生变化，请重新连接并识别".into());
+    }
     let mut uid = [0; 12];
-    core.read_8(config.chip.uid_register(), &mut uid)
+    core.read_8(resolved.uid_register, &mut uid)
         .map_err(|error| detailed_error("无法读取芯片 UID", error))?;
     let info = ChipInfo {
-        name: config.chip.name().into(),
+        name: resolved.name.into(),
+        target: resolved.target.into(),
         device_id: id & 0xfff,
         revision_id: id >> 16,
         flash_start: FLASH_START,
-        flash_size: config.chip.size(),
+        flash_size,
         uid: uid.iter().map(|byte| format!("{byte:02X}")).collect(),
         speed_khz,
         probe_id: config.probe_id.clone(),
     };
     drop(core);
     Ok((session, info))
+}
+
+fn check_confirmed_target(
+    expected: Option<&TargetIdentity>,
+    actual: &ChipInfo,
+) -> Result<(), String> {
+    let expected = expected.ok_or("请先连接并识别目标芯片，再确认烧录或擦除")?;
+    if expected.device_id != actual.device_id
+        || expected.flash_size != actual.flash_size
+        || expected.uid != actual.uid
+    {
+        return Err("目标芯片或容量已改变；请重新连接并识别，然后确认本次操作".into());
+    }
+    Ok(())
 }
 
 pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
@@ -236,6 +336,10 @@ pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
         || app.state::<crate::gamebox::GameBoxState>().snapshot()?.mode
             != crate::gamebox::GameBoxMode::Disconnected
         || app.state::<crate::nfc::NfcState>().snapshot()?.mode != crate::nfc::NfcMode::Disconnected
+        || app
+            .state::<crate::sticks3::StickS3State>()
+            .snapshot()?
+            .connected
     {
         return Err("请先断开设备串口/演示/Mock 会话，再操作 SWD 固件".into());
     }
@@ -322,10 +426,78 @@ fn read_flash(
     Ok(data)
 }
 
+fn while_halted<T>(
+    session: &mut Session,
+    work: impl FnOnce(&mut Session) -> Result<T, String>,
+) -> Result<T, String> {
+    let was_halted = session
+        .core(0)
+        .and_then(|mut core| core.core_halted())
+        .map_err(|error| detailed_error("无法读取核心状态", error))?;
+    session
+        .core(0)
+        .and_then(|mut core| core.halt(Duration::from_secs(2)))
+        .map_err(|error| detailed_error("无法暂停核心", error))?;
+    let result = work(session);
+    let restore = if was_halted {
+        Ok(())
+    } else {
+        session
+            .core(0)
+            .and_then(|mut core| core.run())
+            .map_err(|error| detailed_error("读取结束，但恢复运行失败", error))
+    };
+    match (result, restore) {
+        (Err(error), Err(restore)) => Err(format!("{error}；{restore}")),
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+fn verify_image(
+    session: &mut Session,
+    image: &PreparedImage,
+    state: &FirmwareState,
+) -> Result<(), String> {
+    while_halted(session, |session| {
+        let mut core = session
+            .core(0)
+            .map_err(|error| detailed_error("无法访问核心", error))?;
+        let mut completed = 0;
+        for (address, data) in &image.chunks {
+            for (index, expected) in data.chunks(4096).enumerate() {
+                let address = address + (index * 4096) as u64;
+                let mut actual = vec![0; expected.len()];
+                core.read_8(address, &mut actual)
+                    .map_err(|error| detailed_error("回读校验失败", error))?;
+                if let Some(offset) = actual.iter().zip(expected).position(|(a, b)| a != b) {
+                    return Err(format!(
+                        "校验不一致：地址 {:#010X}，文件 {:02X}，芯片 {:02X}",
+                        address + offset as u64,
+                        expected[offset],
+                        actual[offset]
+                    ));
+                }
+                completed += expected.len() as u64;
+                state.progress(
+                    "verifying",
+                    "正在逐字节比较文件与 Flash",
+                    completed,
+                    Some(image.summary.programmed_size as u64),
+                );
+            }
+        }
+        Ok(())
+    })
+}
+
 enum Operation {
+    Identify,
     Read,
     Erase,
     Flash(PreparedImage),
+    Verify(PreparedImage),
+    Reset,
 }
 
 async fn execute(
@@ -340,87 +512,123 @@ async fn execute(
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
         let state = app.state::<FirmwareState>();
-        let result = (|| {
-            let (mut session, chip) = attach(&config)?;
-            let mut report = FirmwareReport {
-                chip,
-                message: String::new(),
-                bytes: 0,
-                sha256: None,
-                data: None,
-            };
-            match operation {
-                Operation::Read => {
-                    let data = read_flash(&mut session, config.chip.size(), &state, false)?;
-                    report.bytes = data.len();
-                    report.sha256 = Some(sha256(&data));
-                    report.data = Some(data);
-                    report.message =
-                        "完整主 Flash 已读取，可查看或导出 BIN 备份；设备将退出调试状态".into();
-                }
-                Operation::Erase => {
-                    state.progress("erasing", "正在擦除整片主 Flash，请勿断电或拔线", 0, None);
-                    // erase_all also walks OTP in the built-in F411 target. Use
-                    // the explicitly bounded main-Flash range instead.
-                    flashing::erase(
-                        &mut session,
-                        &mut FlashProgress::empty(),
-                        FLASH_START,
-                        FLASH_START + config.chip.size() as u64,
-                        false,
-                    )
-                    .map_err(|error| detailed_error("主 Flash 擦除失败", error))?;
-                    read_flash(&mut session, config.chip.size(), &state, true)?;
-                    session
-                        .core(0)
-                        .and_then(|mut core| core.reset_and_halt(Duration::from_secs(2)))
-                        .map_err(|error| detailed_error("Flash 已擦除，但核心复位失败", error))?;
-                    report.bytes = config.chip.size();
-                    report.message =
-                        "整片主 Flash 已擦除并确认全部为 FF；需要重新烧录固件才能使用".into();
-                }
-                Operation::Flash(image) => {
-                    let mut loader = session.target().flash_loader();
-                    for (address, data) in &image.chunks {
-                        loader
-                            .add_data(*address, data)
-                            .map_err(|error| detailed_error("无法生成烧录计划", error))?;
-                    }
-                    let mut options = DownloadOptions::default();
-                    options.keep_unwritten_bytes = true;
-                    options.verify = true;
-                    options.progress = flash_progress(&state);
-                    loader.commit(&mut session, options).map_err(|error| {
-                        detailed_error("烧录或校验失败，请重新烧录后确认设备状态", error)
-                    })?;
-                    state.progress("resetting", "校验通过，正在复位并启动固件", 0, None);
-                    session
-                        .core(0)
-                        .and_then(|mut core| core.reset())
-                        .map_err(|error| {
-                            detailed_error("固件校验通过，但复位启动失败，请手动重新上电", error)
-                        })?;
-                    report.bytes = image.summary.programmed_size;
-                    report.sha256 = Some(image.summary.sha256);
-                    report.message =
-                        "固件烧录与回读校验通过，已复位启动；覆盖范围之外的数据已保留".into();
-                }
-            }
-            Ok::<_, String>(report)
-        })();
-        match &result {
-            Ok(report) => state.progress(
-                "complete",
-                &report.message,
-                report.bytes as u64,
-                Some(report.bytes as u64),
-            ),
-            Err(error) => state.progress("error", error, 0, None),
-        }
-        result
+        execute_job(&config, operation, &state)
     })
     .await
     .map_err(|error| format!("固件后台任务中断: {error}"))?
+}
+
+fn execute_job(
+    config: &ProbeConfig,
+    operation: Operation,
+    state: &FirmwareState,
+) -> Result<FirmwareReport, String> {
+    let result = (|| {
+        let (mut session, chip) = attach(config)?;
+        if config.chip == TargetSelection::AUTO
+            && matches!(operation, Operation::Erase | Operation::Flash(_))
+        {
+            check_confirmed_target(config.expected_target.as_ref(), &chip)?;
+        }
+        if let Operation::Flash(image) | Operation::Verify(image) = &operation {
+            validate_detected_capacity(image, chip.flash_size)?;
+        }
+        let flash_size = chip.flash_size;
+        let mut report = FirmwareReport {
+            chip,
+            message: String::new(),
+            bytes: 0,
+            sha256: None,
+            data: None,
+        };
+        match operation {
+            Operation::Identify => {
+                report.message =
+                    "芯片连接成功，已读取器件 ID、实际 Flash 容量与 UID；USB 已释放".into();
+            }
+            Operation::Read => {
+                let data = while_halted(&mut session, |session| {
+                    read_flash(session, flash_size, state, false)
+                })?;
+                report.bytes = data.len();
+                report.sha256 = Some(sha256(&data));
+                report.data = Some(data);
+                report.message =
+                    "完整主 Flash 已读取，可查看或导出 BIN 备份；核心运行状态已恢复".into();
+            }
+            Operation::Erase => {
+                state.progress("erasing", "正在擦除整片主 Flash，请勿断电或拔线", 0, None);
+                // erase_all also walks OTP in the built-in F411 target. Use
+                // the explicitly bounded main-Flash range instead.
+                flashing::erase(
+                    &mut session,
+                    &mut FlashProgress::empty(),
+                    FLASH_START,
+                    FLASH_START + flash_size as u64,
+                    false,
+                )
+                .map_err(|error| detailed_error("主 Flash 擦除失败", error))?;
+                read_flash(&mut session, flash_size, state, true)?;
+                session
+                    .core(0)
+                    .and_then(|mut core| core.reset_and_halt(Duration::from_secs(2)))
+                    .map_err(|error| detailed_error("Flash 已擦除，但核心复位失败", error))?;
+                report.bytes = flash_size;
+                report.message =
+                    "整片主 Flash 已擦除并确认全部为 FF；需要重新烧录固件才能使用".into();
+            }
+            Operation::Flash(image) => {
+                let mut loader = session.target().flash_loader();
+                for (address, data) in &image.chunks {
+                    loader
+                        .add_data(*address, data)
+                        .map_err(|error| detailed_error("无法生成烧录计划", error))?;
+                }
+                let mut options = DownloadOptions::default();
+                options.keep_unwritten_bytes = true;
+                options.verify = true;
+                options.progress = flash_progress(state);
+                loader.commit(&mut session, options).map_err(|error| {
+                    detailed_error("烧录或校验失败，请重新烧录后确认设备状态", error)
+                })?;
+                state.progress("resetting", "校验通过，正在复位并启动固件", 0, None);
+                session
+                    .core(0)
+                    .and_then(|mut core| core.reset())
+                    .map_err(|error| {
+                        detailed_error("固件校验通过，但复位启动失败，请手动重新上电", error)
+                    })?;
+                report.bytes = image.summary.programmed_size;
+                report.sha256 = Some(image.summary.sha256);
+                report.message =
+                    "固件烧录与回读校验通过，已复位启动；覆盖范围之外的数据已保留".into();
+            }
+            Operation::Verify(image) => {
+                verify_image(&mut session, &image, state)?;
+                report.bytes = image.summary.programmed_size;
+                report.sha256 = Some(image.summary.sha256);
+                report.message = "文件范围内的 Flash 逐字节校验通过；核心运行状态已恢复".into();
+            }
+            Operation::Reset => {
+                session
+                    .core(0)
+                    .and_then(|mut core| core.reset())
+                    .map_err(|error| detailed_error("目标芯片复位失败", error))?;
+                report.message = "目标芯片已复位运行".into();
+            }
+        }
+        Ok::<_, String>(report)
+    })();
+    match &result {
+        Ok(report) => state.progress(
+            "complete",
+            &report.message,
+            report.bytes as u64,
+            Some(report.bytes as u64),
+        ),
+        Err(error) => state.progress("error", error, 0, None),
+    }
+    result
 }
 
 #[tauri::command]
@@ -431,8 +639,7 @@ pub fn firmware_status(state: State<'_, FirmwareState>) -> FirmwareStatus {
 #[tauri::command]
 pub async fn firmware_list_probes() -> Result<Vec<ProbeOption>, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        StLinkFactory
-            .list_probes()
+        list_probes()
             .into_iter()
             .map(|item| ProbeOption {
                 id: probe_id(&item.info),
@@ -443,7 +650,7 @@ pub async fn firmware_list_probes() -> Result<Vec<ProbeOption>, String> {
             .collect()
     })
     .await
-    .map_err(|error| format!("枚举 ST-Link 失败: {error}"))
+    .map_err(|error| format!("枚举 SWD 烧录器失败: {error}"))
 }
 
 #[tauri::command]
@@ -459,6 +666,34 @@ pub async fn firmware_read(app: AppHandle, config: ProbeConfig) -> Result<Firmwa
 }
 
 #[tauri::command]
+pub async fn firmware_identify(
+    app: AppHandle,
+    config: ProbeConfig,
+) -> Result<FirmwareReport, String> {
+    execute(app, config, Operation::Identify).await
+}
+
+#[tauri::command]
+pub async fn firmware_reset(app: AppHandle, config: ProbeConfig) -> Result<FirmwareReport, String> {
+    execute(app, config, Operation::Reset).await
+}
+
+#[tauri::command]
+pub async fn firmware_verify(
+    app: AppHandle,
+    config: ProbeConfig,
+    image: ImageRequest,
+) -> Result<FirmwareReport, String> {
+    if config.chip != image.chip {
+        return Err("文件检查时的目标芯片已改变，请重新检查".into());
+    }
+    let prepared = tauri::async_runtime::spawn_blocking(move || prepare_image(&image))
+        .await
+        .map_err(|error| format!("固件解析任务中断: {error}"))??;
+    execute(app, config, Operation::Verify(prepared)).await
+}
+
+#[tauri::command]
 pub async fn firmware_erase(
     app: AppHandle,
     config: ProbeConfig,
@@ -468,8 +703,8 @@ pub async fn firmware_erase(
     execute(app, config, Operation::Erase).await
 }
 
-fn validate_erase(chip: Chip, confirmation: &str) -> Result<(), String> {
-    if chip == Chip::Stm32f103c8t6 {
+fn validate_erase(chip: TargetSelection, confirmation: &str) -> Result<(), String> {
+    if chip.fixed() == Some(Chip::Stm32f103c8t6) {
         return Err("游戏机更新会保留末尾 2 KiB 设置区，不提供整片擦除".into());
     }
     if confirmation != "ERASE" {
@@ -512,13 +747,58 @@ mod tests {
         assert!(check_identity(0x410, 0xffff, Chip::Stm32f103c8t6).is_err());
         assert!(check_identity(0x431, 64, Chip::Stm32f103c8t6).is_err());
         assert!(check_identity(0x410, 512, Chip::Stm32f411ceu).is_err());
+        assert!(check_identity(0x2003_6468, 128, Chip::Stm32g431cbu6).is_ok());
+        assert!(check_identity(0x468, 64, Chip::Stm32g431cbu6).is_err());
+        assert!(check_identity(0x410, 128, Chip::Stm32g431cbu6).is_err());
+        assert!(check_identity(0x410, 128, Chip::Stm32f103cbt6).is_ok());
+        assert!(check_identity(0x410, 64, Chip::Stm32f103cbt6).is_err());
     }
 
     #[test]
     fn full_erase_requires_confirmation_and_cannot_clear_gamebox_settings() {
-        assert!(validate_erase(Chip::Stm32f411ceu, "ERASE").is_ok());
-        assert!(validate_erase(Chip::Stm32f411ceu, "").is_err());
-        assert!(validate_erase(Chip::Stm32f103c8t6, "ERASE").is_err());
+        assert!(validate_erase(Chip::Stm32f411ceu.into(), "ERASE").is_ok());
+        assert!(validate_erase(Chip::Stm32f411ceu.into(), "").is_err());
+        assert!(validate_erase(Chip::Stm32f103c8t6.into(), "ERASE").is_err());
+        assert!(validate_erase(TargetSelection::AUTO, "ERASE").is_ok());
+        assert!(validate_erase(TargetSelection::AUTO, "").is_err());
+    }
+
+    #[test]
+    fn automatic_mutations_require_the_same_detected_chip_capacity_and_uid() {
+        let actual = ChipInfo {
+            name: "STM32F1".into(),
+            target: "STM32F103C8Tx".into(),
+            device_id: 0x410,
+            revision_id: 0x2000,
+            flash_start: FLASH_START,
+            flash_size: 64 * 1024,
+            uid: "0102030405060708090A0B0C".into(),
+            speed_khz: 100,
+            probe_id: "303a:4004:fixture".into(),
+        };
+        assert!(check_confirmed_target(None, &actual).is_err());
+        let expected = TargetIdentity {
+            device_id: actual.device_id,
+            flash_size: actual.flash_size,
+            uid: actual.uid.clone(),
+        };
+        assert!(check_confirmed_target(Some(&expected), &actual).is_ok());
+        for changed in [
+            TargetIdentity {
+                flash_size: 128 * 1024,
+                ..expected.clone()
+            },
+            TargetIdentity {
+                uid: "different-board".into(),
+                ..expected.clone()
+            },
+            TargetIdentity {
+                device_id: 0x468,
+                ..expected.clone()
+            },
+        ] {
+            assert!(check_confirmed_target(Some(&changed), &actual).is_err());
+        }
     }
 
     #[test]
@@ -543,6 +823,8 @@ mod tests {
         for (chip, algorithm) in [
             (Chip::Stm32f411ceu, "stm32f4xx_1024"),
             (Chip::Stm32f103c8t6, "stm32f10x_128"),
+            (Chip::Stm32f103cbt6, "stm32f10x_128"),
+            (Chip::Stm32g431cbu6, "stm32g47x-8x_512"),
         ] {
             let target = registry.get_target_by_name(chip.target()).unwrap();
             assert!(target
@@ -559,3 +841,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "firmware_hardware_tests.rs"]
+mod hardware_tests;

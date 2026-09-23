@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { firmwareApi, firmwareFormat, FIRMWARE_TARGETS, FLASH_START, flashRows, hexAddress, parseFlashAddress } from "./firmware";
+import { firmwareApi, firmwareFormat, firmwareImageRangeError, FIRMWARE_TARGETS, FLASH_START, flashRows, hexAddress, parseFlashAddress, resolveFirmwareTarget, sameFlashTarget, type ChipInfo } from "./firmware";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -7,6 +7,16 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("固件文件与 Flash 地址", () => {
+  it("shows the last byte of a G431 backup and bounds SWD target addresses", () => {
+    const size = 128 * 1024;
+    const data = new Array<number>(size).fill(0xff);
+    data[data.length - 1] = 0x47;
+    expect(flashRows(data, 511).at(-1)?.address).toBe("0x0801FFF0");
+    expect(flashRows(data, 511).at(-1)?.ascii).toBe("...............G");
+    expect(flashRows(data, 512)).toEqual([]);
+    expect(parseFlashAddress("0801ffff", size)).toBe(FLASH_START + 128 * 1024 - 1);
+    expect(() => parseFlashAddress("08020000", size)).toThrow();
+  });
   it("supports downloaded firmware formats without guessing unknown extensions", () => {
     expect(firmwareFormat("WL1-v2.BIN")).toBe("bin");
     expect(firmwareFormat("motor.axf")).toBe("elf");
@@ -54,6 +64,45 @@ describe("固件文件与 Flash 地址", () => {
     const row = flashRows([0, 31, 32, 65, 126, 127, 255], 0)[0];
     expect(row?.hex).toBe("00 1F 20 41 7E 7F FF");
     expect(row?.ascii).toBe(".. A~..");
+  });
+});
+
+describe("通用 SWD 按实测容量操作", () => {
+  const detected: ChipInfo = {
+    name: "STM32F1", target: "STM32F103C8Tx", deviceId: 0x410, revisionId: 0x2000,
+    flashStart: FLASH_START, flashSize: 64 * 1024, uid: "00112233445566778899AABB",
+    speedKhz: 100, probeId: "303a:4004:fixture",
+  };
+
+  it("starts without a guessed capacity and uses all 64 KiB after F1 discovery", () => {
+    const pending = resolveFirmwareTarget("sticks3", null);
+    expect(pending.chip).toBe("auto");
+    expect(pending.flashSize).toBeNull();
+    expect(pending.programSize).toBeNull();
+    const actual = resolveFirmwareTarget("sticks3", detected);
+    expect(actual.flashSize).toBe(64 * 1024);
+    expect(actual.programSize).toBe(64 * 1024);
+    expect(actual.canErase).toBe(true);
+    expect(resolveFirmwareTarget("gamebox", detected).programSize).toBe(62 * 1024);
+    expect(resolveFirmwareTarget("gamebox", detected).canErase).toBe(false);
+    expect(resolveFirmwareTarget("wl1", detected).flashSize).toBe(512 * 1024);
+  });
+
+  it("rechecks every file region when discovered capacity changes", () => {
+    const file = { fileSize: 4, programmedSize: 4, sha256: "fixture", regions: [{ address: FLASH_START + 65535, length: 1 }] };
+    expect(firmwareImageRangeError(file, 65536)).toBeNull();
+    const beyond = { ...file, regions: [...file.regions, { address: FLASH_START + 65536, length: 1 }] };
+    expect(firmwareImageRangeError(beyond, null)).toBeNull();
+    expect(firmwareImageRangeError(beyond, 65536)).toContain("实测 64 KiB");
+    expect(firmwareImageRangeError(beyond, 131072)).toBeNull();
+    expect(firmwareImageRangeError({ ...file, regions: [{ address: 0x20000000, length: 1 }] }, 65536)).not.toBeNull();
+  });
+
+  it("distinguishes replacement chips behind the same probe and preserves snapshot identity", () => {
+    expect(sameFlashTarget(detected, { ...detected, speedKhz: 1000 })).toBe(true);
+    expect(sameFlashTarget(detected, { ...detected, uid: "new-board" })).toBe(false);
+    expect(sameFlashTarget(detected, { ...detected, flashSize: 131072 })).toBe(false);
+    expect(sameFlashTarget(detected, { ...detected, deviceId: 0x468 })).toBe(false);
   });
 });
 

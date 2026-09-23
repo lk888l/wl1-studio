@@ -1,0 +1,2 @@
+# StickS3 CMSIS-DAP only; apply before 73-seat-late.rules.
+SUBSYSTEM=="usb", ATTR{idVendor}=="303a", ATTR{idProduct}=="4004", TAG+="uaccess"

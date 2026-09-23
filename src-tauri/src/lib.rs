@@ -4,6 +4,7 @@ mod bluetooth;
 mod commands;
 mod firmware;
 mod firmware_image;
+mod firmware_target;
 mod firmware_usb;
 mod gamebox;
 mod mifare;
@@ -11,6 +12,7 @@ mod nfc;
 mod pn532;
 mod protocol;
 mod state;
+mod sticks3;
 mod transport;
 mod types;
 
@@ -48,6 +50,7 @@ pub fn run() {
         .manage(bluetooth::BluetoothState::default())
         .manage(gamebox::GameBoxState::default())
         .manage(nfc::NfcState::default())
+        .manage(sticks3::StickS3State::default())
         .manage(commands::ProductSessionLifecycle::default())
         .manage(firmware::FirmwareState::default())
         .invoke_handler(tauri::generate_handler![
@@ -55,6 +58,9 @@ pub fn run() {
             firmware::firmware_list_probes,
             firmware::firmware_inspect,
             firmware::firmware_read,
+            firmware::firmware_identify,
+            firmware::firmware_verify,
+            firmware::firmware_reset,
             firmware::firmware_erase,
             firmware::firmware_flash,
             firmware_usb::firmware_usb_support,
@@ -77,6 +83,10 @@ pub fn run() {
             commands::nfc_cancel,
             commands::nfc_read_card,
             commands::nfc_write_card,
+            commands::sticks3_connect,
+            commands::sticks3_disconnect,
+            commands::sticks3_snapshot,
+            commands::sticks3_request,
         ])
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
@@ -103,6 +113,7 @@ pub fn run() {
                 let state = app.state::<state::AppState>();
                 let gamebox = app.state::<gamebox::GameBoxState>();
                 let nfc = app.state::<nfc::NfcState>();
+                let sticks3 = app.state::<sticks3::StickS3State>();
                 let lifecycle = app.state::<commands::ProductSessionLifecycle>();
                 let _lifecycle = lifecycle
                     .0
@@ -111,6 +122,7 @@ pub fn run() {
                 let _ = state.disconnect(None);
                 let _ = gamebox.disconnect(None);
                 let _ = nfc.disconnect(None);
+                let _ = sticks3.disconnect(None);
             }
         });
 }

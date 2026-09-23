@@ -29,6 +29,23 @@ WL1 现支持 **ZX-D30 单模 BLE 扫描连接与遥控**。选择蓝牙设备�
 
 “存储与检查”保留本地 `.bin` 大小、CRC-32、初始栈指针和复位向量检查，该检查不直接烧录。后续外置 SPI Flash 将用于保存多个固件包，串口传输与 bootloader 均属规划；普通 SPI NOR 不能让 F103 直接执行更大的单个固件，bootloader 还会占用内部 Flash。协议、源码基线、容量边界和实机验证项见 [GameBox 接入指南](docs/gamebox-integration.md)。
 
+## StickS3 多功能工作台
+
+从产品库进入 **StickS3 多功能终端**，通过 USB 控制台在独立“无线连接”页扫描、选择和连接
+Wi-Fi / BLE 外设。支持手动填写 SSID、临时连接、连接成功后记住、每种无线 4 个记忆槽的切换
+与忘记，以及 BLE 主服务查看。连接与记忆状态以固件实际回报为准；密码不保存到电脑设置中。
+
+“SWD 调试器”页通过 USB CMSIS-DAP 提供芯片识别、完整 Flash 读取、十六进制 / ASCII
+浏览、地址跳转、BIN 备份、BIN / HEX / ELF / AXF 烧录、独立校验、整片主 Flash 擦除和复位。
+按实际器件 ID 与容量自动匹配 STM32F1 中容量、STM32F411、STM32G431，无需选择具体封装型号。
+读取、文件范围检查和擦除均使用实测容量；F103 报告 64 KiB 时可正常使用完整 64 KiB。
+已用 G431 完成桌面实机读取、擦除、空白检查和原程序恢复，并以 OpenOCD 独立回读确认一致。
+
+DAP 模式在 S3 屏幕选择；USB DAP 与配网控制串口互斥。Wi-Fi / BLE DAP 保留接线与工具
+说明，仍需单独运行 OpenOCD / BLE 桥接器。使用方式见 [StickS3 接入指南](docs/sticks3-integration.md)，
+测试范围与备份见 [SWD 验收记录](docs/sticks3-swd-validation.md)。
+自动识别改动的支持范围和待实机验证项见 [容量识别说明](docs/sticks3-swd-auto-detection.md)。
+
 ## 当前定位
 
 WL1 工作台可选择 **蓝牙 BLE、USB 串口** 或 **通过遥控器无线调参**。遥控器模式支持 PID 与姿态偏置下发，需要先更新遥控器串口桥接固件；原版固件没有启动串口 RX。接线、使用步骤与回传限制见[遥控器无线调参指南](docs/remote-tuning.md)。下文 Legacy 遥测与 idle 分帧说明仅适用于旧版有线固件；蓝牙入口使用 SoftEngine 显式分帧，所提供 2026-09 固件为 500 ms 运动超时，详见蓝牙指南。

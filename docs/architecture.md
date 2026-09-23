@@ -33,7 +33,7 @@ GameBox 页面
 
 本地固件检查是独立纯数据流程：用户选择 `.bin` 后在主机检查当前应用区大小与 Cortex-M 初始向量，并计算 CRC-32；它不访问串口，也不提供升级权限。当前应用区从 `0x08000000` 开始，占 62 KiB，最后两个 1 KiB 页保留设置。未来固件包管理、分块传输与 bootloader 安装需要新增版本化能力和固件实现，当前不存在对应升级 API。
 
-两个产品共用 `FirmwarePage → firmwareApi → Rust firmware/firmware_image → probe-rs` 的 ST-Link/SWD 通道。产品绑定固定目标：WL1 为 STM32F411CEU / 512 KiB，GameBox 暂定 STM32F103C8T6 / 64 KiB；后端按目标核对系列 ID、容量及 UID 寄存器。GameBox 写入最多前 62 KiB，读取完整 64 KiB，不开放整片擦除。全局固件任务与产品会话锁互斥，页面切换保留读取快照，操作中阻止串口重连、返回产品库和正常退出；USB 手动授权设置复用同一任务锁。该通道不依赖设备串口下行命令或 bootloader。
+WL1、GameBox 与 StickS3 共用 `FirmwarePage → firmwareApi → Rust firmware/firmware_image → probe-rs` 的 ST-Link / CMSIS-DAP SWD 通道。WL1 固定 STM32F411CEU / 512 KiB，GameBox 暂定 STM32F103C8T6 / 64 KiB；StickS3 使用独立的 `auto` 目标，先通过 ARM 调试接口读取系列 ID 和容量，再由 `firmware_target.rs` 选择内置 Flash 算法，仅列出 StickS3 USB DAP 探针。自动模式按实测容量读写完整主 Flash；产品配置中的 GameBox 则只写前 62 KiB，读取完整 64 KiB，不开放整片擦除。文件离线解析与连接后的实测容量校验分开，烧录 / 擦除还核对确认时的 UID、系列和容量。全局固件任务与产品会话锁互斥，页面切换保留读取快照，操作中阻止串口重连、返回产品库和正常退出；USB 手动授权设置复用同一任务锁。读取和独立校验结束后恢复此前的核心运行状态，每次操作完成释放 USB。该通道不依赖设备串口下行命令或 bootloader。
 
 外置 SPI Flash 规划用于存储多个包、资源与恢复来源。STM32F103C8 不能直接从普通 SPI NOR 执行代码，每个安装到内部 Flash 的应用仍须符合内部容量；常驻 bootloader 还会减少可用应用区。新布局必须同步主机检查、链接地址、设置保留和断电恢复设计，不能把现在的 62 KiB 检查固定用于未来布局。源码依据和分阶段规划见 [GameBox 接入指南](gamebox-integration.md)。
 

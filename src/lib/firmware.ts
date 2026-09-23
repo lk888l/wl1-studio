@@ -5,16 +5,30 @@ import { GAMEBOX_APPLICATION_BYTES } from "./gamebox-firmware";
 export const FLASH_START = 0x08000000;
 export const MAX_FIRMWARE_SIZE = 16 * 1024 * 1024;
 export const FLASH_PAGE_SIZE = 256;
-export type FirmwareChip = "stm32f411ceu" | "stm32f103c8t6";
-export type FirmwareProduct = "wl1" | "gamebox";
+export type FirmwareChip = "auto" | "stm32f411ceu" | "stm32f103c8t6" | "stm32f103cbt6" | "stm32g431cbu6";
+export type FirmwareProduct = "wl1" | "gamebox" | "sticks3";
 export type FirmwareFormat = "bin" | "hex" | "elf";
 
 export const FIRMWARE_TARGETS = {
   wl1: { chip: "stm32f411ceu", label: "STM32F411CEU", flashSize: 512 * 1024, programSize: 512 * 1024, canErase: true, backupPrefix: "WL1" },
   gamebox: { chip: "stm32f103c8t6", label: "STM32F103C8T6", flashSize: 64 * 1024, programSize: GAMEBOX_APPLICATION_BYTES, canErase: false, backupPrefix: "GameBox" },
-} as const satisfies Record<FirmwareProduct, {
-  chip: FirmwareChip; label: string; flashSize: number; programSize: number; canErase: boolean; backupPrefix: string;
-}>;
+  sticks3: { chip: "auto", label: "自动识别 STM32", flashSize: null, programSize: null, canErase: true, backupPrefix: "SWD" },
+} as const satisfies Record<FirmwareProduct, FirmwareTarget>;
+
+export interface FirmwareTarget {
+  chip: FirmwareChip;
+  label: string;
+  flashSize: number | null;
+  programSize: number | null;
+  canErase: boolean;
+  backupPrefix: string;
+}
+
+export function resolveFirmwareTarget(product: FirmwareProduct, detected: ChipInfo | null): FirmwareTarget {
+  const profile = FIRMWARE_TARGETS[product];
+  if (product !== "sticks3" || !detected) return profile;
+  return { ...profile, label: detected.name, flashSize: detected.flashSize, programSize: detected.flashSize, backupPrefix: detected.name };
+}
 
 export interface ProbeOption {
   id: string;
@@ -28,6 +42,7 @@ export interface ProbeConfig {
   chip: FirmwareChip;
   speedKhz: number;
   connectUnderReset: boolean;
+  expectedTarget?: Pick<ChipInfo, "deviceId" | "flashSize" | "uid">;
 }
 
 export interface FirmwareImage {
@@ -54,6 +69,7 @@ export interface FirmwareStatus {
 
 export interface ChipInfo {
   name: string;
+  target: string;
   deviceId: number;
   revisionId: number;
   flashStart: number;
@@ -61,6 +77,18 @@ export interface ChipInfo {
   uid: string;
   speedKhz: number;
   probeId: string;
+}
+
+export function sameFlashTarget(a: ChipInfo, b: ChipInfo): boolean {
+  return a.probeId === b.probeId && a.deviceId === b.deviceId && a.flashSize === b.flashSize && a.uid === b.uid;
+}
+
+export function firmwareImageRangeError(summary: ImageSummary, flashSize: number | null): string | null {
+  if (flashSize === null) return null;
+  if (summary.regions.some(({ address, length }) => address < FLASH_START || !Number.isSafeInteger(address + length) || address + length > FLASH_START + flashSize)) {
+    return `文件写入范围超出实测 ${flashSize / 1024} KiB Flash（结束地址 ${hexAddress(FLASH_START + flashSize - 1)}）。请选择适合此容量的固件。`;
+  }
+  return null;
 }
 
 export interface FirmwareReport {
@@ -79,7 +107,7 @@ export interface UsbSupport {
 }
 
 async function desktop<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauriRuntime()) throw new Error("ST-Link 需要桌面应用；浏览器预览不能访问 USB 或烧录固件。");
+  if (!isTauriRuntime()) throw new Error("SWD 烧录器需要桌面应用；浏览器预览不能访问 USB 或烧录固件。");
   return invoke<T>(command, args);
 }
 
@@ -88,10 +116,13 @@ export const firmwareApi = {
   listProbes: () => desktop<ProbeOption[]>("firmware_list_probes"),
   inspect: (image: FirmwareImage) => desktop<ImageSummary>("firmware_inspect", { image }),
   read: (config: ProbeConfig) => desktop<FirmwareReport>("firmware_read", { config }),
+  identify: (config: ProbeConfig) => desktop<FirmwareReport>("firmware_identify", { config }),
+  reset: (config: ProbeConfig) => desktop<FirmwareReport>("firmware_reset", { config }),
+  verify: (config: ProbeConfig, image: FirmwareImage) => desktop<FirmwareReport>("firmware_verify", { config, image }),
   erase: (config: ProbeConfig, confirmation: string) => desktop<FirmwareReport>("firmware_erase", { config, confirmation }),
   flash: (config: ProbeConfig, image: FirmwareImage, confirmedSha256: string) => desktop<FirmwareReport>("firmware_flash", { config, image, confirmedSha256 }),
-  usbSupport: () => desktop<UsbSupport>("firmware_usb_support"),
-  installUsbSupport: () => desktop<string>("firmware_install_usb_support", { confirmed: true }),
+  usbSupport: (sticks3 = false) => desktop<UsbSupport>("firmware_usb_support", sticks3 ? { sticks3 } : undefined),
+  installUsbSupport: (sticks3 = false) => desktop<string>("firmware_install_usb_support", { confirmed: true, ...(sticks3 ? { sticks3 } : {}) }),
 };
 
 export function firmwareFormat(name: string): FirmwareFormat {

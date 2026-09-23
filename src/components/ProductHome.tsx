@@ -19,6 +19,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   Upload,
+  Wifi,
+  Bluetooth,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,7 +31,7 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | "gamebox" | "nfc" | null;
+  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
@@ -38,6 +40,7 @@ interface ProductHomeProps {
   onOpenPiano: () => void;
   onOpenGameBox: () => void;
   onOpenNfc: () => void;
+  onOpenStickS3: () => void;
 }
 
 export function ProductHome({
@@ -53,6 +56,7 @@ export function ProductHome({
   onOpenPiano,
   onOpenGameBox,
   onOpenNfc,
+  onOpenStickS3,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -126,10 +130,42 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>3 个设备工作台 · 1 个交互预览</span>
+            <span>4 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
           </div>
 
           <div className="product-catalog__layout">
+            <button
+              className={`product-card product-card--sticks3 glass-card liquid-card is-${safetyState}${launching === "sticks3" ? " is-launching" : ""}`}
+              type="button"
+              disabled={safetyState !== "ready" || Boolean(launching)}
+              aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
+              onClick={onOpenStickS3}
+            >
+              <span className="product-card__visual" aria-hidden="true">
+                <span className="product-card__model">M5 STICKS3</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true">
+                  <defs><linearGradient id="hubS3Body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ffb460" /><stop offset="1" stopColor="#e76b2e" /></linearGradient></defs>
+                  <ellipse cx="260" cy="271" rx="117" ry="13" fill="#874d2f" opacity=".13" />
+                  <g transform="rotate(-12 260 151)">
+                    <rect x="183" y="26" width="154" height="245" rx="34" fill="url(#hubS3Body)" stroke="#ffe9d5" strokeWidth="4" />
+                    <rect x="197" y="41" width="126" height="188" rx="24" fill="#292d36" />
+                    <rect x="207" y="52" width="106" height="164" rx="15" fill="#152332" />
+                    <g fill="none" stroke="#ffb66b" strokeWidth="6" strokeLinecap="round"><path d="M232 105q28-25 56 0M243 118q17-14 34 0" /><path d="M260 136v1" /></g>
+                    <text x="260" y="166" textAnchor="middle" fill="#fce1bb" fontSize="18" fontFamily="sans-serif" fontWeight="600">StickS3</text>
+                    <text x="260" y="189" textAnchor="middle" fill="#91a5b9" fontSize="10" fontFamily="sans-serif">CONNECTED TO IDEAS</text>
+                    <rect x="240" y="240" width="40" height="9" rx="4.5" fill="#ae4c24" />
+                    <rect x="337" y="82" width="6" height="31" rx="3" fill="#cf6129" />
+                  </g>
+                </svg>
+              </span>
+              <span className="product-card__body">
+                <span className="product-card__meta"><span className="product-available"><i />USB 配网与烧录</span></span>
+                <span className="product-card__title"><strong>StickS3 多功能终端</strong></span>
+                <span className="product-card__description">管理 Wi-Fi 与 BLE 连接，通过 USB DAP 查看目标 Flash、备份、烧写和校验固件。</span>
+                <span className="product-card__features"><span><Wifi size={15} />Wi-Fi 配网</span><span><Bluetooth size={15} />蓝牙连接</span><span><Cpu size={15} />SWD 烧录</span></span>
+                <span className="product-card__action"><strong>{launching === "sticks3" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入 StickS3 工作台"}</strong><ArrowRight size={21} /></span>
+              </span>
+            </button>
             <button
               className={`product-card product-card--gamebox glass-card liquid-card is-${safetyState}${launching === "gamebox" ? " is-launching" : ""}`}
               type="button"

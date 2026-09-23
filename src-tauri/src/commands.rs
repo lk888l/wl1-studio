@@ -6,6 +6,7 @@ use crate::gamebox::{GameBoxSnapshot, GameBoxState};
 use crate::mifare::CardDump;
 use crate::nfc::{NfcSnapshot, NfcState, ReadOptions, WriteOptions, WriteReport};
 use crate::state::AppState;
+use crate::sticks3::{RadioRequest, StickS3Snapshot, StickS3State};
 use crate::types::{
     BluetoothDeviceOption, ConnectionRequestMode, ConnectionSnapshot, ConnectionTarget,
     DeviceCapabilities, MotionTargetRequest, SerialConfig, SerialPortOption,
@@ -16,7 +17,7 @@ use crate::types::{
 /// cancellable; this only exists so a wedged port cannot hang a command forever.
 const NFC_OPERATION_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Serializes product switches across both independently owned backends.
+/// Serializes product switches across independently owned backends.
 /// Order: product lifecycle -> one product's lifecycle -> its session state.
 #[derive(Default)]
 pub struct ProductSessionLifecycle(pub std::sync::Mutex<()>);
@@ -95,11 +96,13 @@ fn connect_device_blocking(
     let state = app.state::<AppState>();
     let gamebox = app.state::<GameBoxState>();
     let nfc = app.state::<NfcState>();
+    let sticks3 = app.state::<StickS3State>();
     let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
     firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
+            sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
             state.connect_mock(app.clone())
@@ -118,6 +121,7 @@ fn connect_device_blocking(
                 .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
+            sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
             state.connect_serial(app.clone(), port_name, &config)
@@ -131,6 +135,7 @@ fn connect_device_blocking(
                 .as_deref()
                 .filter(|id| !id.is_empty())
                 .ok_or("请扫描并选择蓝牙设备")?;
+            sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
             state.connect_ble(
@@ -178,6 +183,8 @@ pub fn gamebox_connect(
     // Preserve the existing robot safety shutdown when switching products.
     // Its writes target only its previously owned WL1 port, never GameBox.
     state.disconnect(None)?;
+    app.state::<StickS3State>().disconnect(None)?;
+    app.state::<NfcState>().disconnect(None)?;
     gamebox.connect(app, port_name)
 }
 
@@ -219,7 +226,61 @@ pub fn nfc_connect(
     // device being abandoned.
     state.disconnect(None)?;
     gamebox.disconnect(None)?;
+    app.state::<StickS3State>().disconnect(None)?;
     nfc.connect(app, port_name)
+}
+
+#[tauri::command]
+pub async fn sticks3_connect(app: AppHandle, port_name: String) -> Result<StickS3Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<ProductSessionLifecycle>();
+        let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        app.state::<crate::firmware::FirmwareState>()
+            .ensure_idle()?;
+        let port_name = port_name.trim();
+        ensure_serial_port_available(port_name)?;
+        app.state::<AppState>().disconnect(None)?;
+        app.state::<GameBoxState>().disconnect(None)?;
+        app.state::<NfcState>().disconnect(None)?;
+        app.state::<StickS3State>().connect(port_name)
+    })
+    .await
+    .map_err(|error| format!("S3 连接任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn sticks3_disconnect(
+    app: AppHandle,
+    expected_session_id: Option<u64>,
+) -> Result<StickS3Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<ProductSessionLifecycle>();
+        let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        app.state::<StickS3State>().disconnect(expected_session_id)
+    })
+    .await
+    .map_err(|error| format!("S3 断开任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn sticks3_snapshot(app: AppHandle) -> Result<StickS3Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<StickS3State>().snapshot())
+        .await
+        .map_err(|error| format!("S3 状态任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn sticks3_request(
+    app: AppHandle,
+    expected_session_id: u64,
+    request: RadioRequest,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<StickS3State>()
+            .request(expected_session_id, request)
+    })
+    .await
+    .map_err(|error| format!("S3 请求任务中断：{error}"))?
 }
 
 #[tauri::command]

@@ -14,6 +14,8 @@ const LICENSE: &str = concat!(
 #[cfg(any(target_os = "linux", test))]
 const LINUX_RULE: &str = include_str!("../resources/stlink/70-wl1-stlink.rules");
 #[cfg(any(target_os = "linux", test))]
+const STICKS3_RULE: &str = include_str!("../resources/stlink/70-wl1-sticks3.rules");
+#[cfg(any(target_os = "linux", test))]
 const LINUX_SETUP: &str = include_str!("../resources/stlink/install-linux.sh");
 #[cfg(any(all(target_os = "windows", target_arch = "x86_64"), test))]
 const DRIVER: &[u8] = include_bytes!("../resources/stlink/stsw-link009.zip");
@@ -34,7 +36,21 @@ pub struct UsbSupport {
 }
 
 #[tauri::command]
-pub fn firmware_usb_support() -> UsbSupport {
+pub fn firmware_usb_support(sticks3: Option<bool>) -> UsbSupport {
+    if sticks3.unwrap_or(false) {
+        return UsbSupport {
+            platform: std::env::consts::OS,
+            can_install: cfg!(target_os = "linux"),
+            description: if cfg!(target_os = "linux") {
+                "内置 StickS3 USB 权限规则。系统授权后只对 303a:4004 应用规则，并刷新已连接设备的访问权限；完成后点击刷新烧录器。"
+            } else if cfg!(target_os = "windows") {
+                "StickS3 USB DAP 使用 WinUSB，固件提供自动绑定描述符。请先进入 USB DAP 并等待系统识别，再刷新烧录器。"
+            } else {
+                "StickS3 USB DAP 使用系统 USB 支持，无需 ST-Link 驱动。请进入 USB DAP 并关闭占用烧录器的其他软件。"
+            },
+            license: "",
+        };
+    }
     UsbSupport {
         platform: std::env::consts::OS,
         can_install: cfg!(any(
@@ -54,11 +70,11 @@ pub fn firmware_usb_support() -> UsbSupport {
     }
 }
 
-fn validate_confirmation(confirmed: bool) -> Result<(), String> {
+fn validate_confirmation(confirmed: bool, sticks3: bool) -> Result<(), String> {
     if !confirmed {
         return Err("请先在应用中确认 USB 设置，再通过系统管理员授权".into());
     }
-    if !firmware_usb_support().can_install {
+    if !firmware_usb_support(Some(sticks3)).can_install {
         return Err("当前平台不提供应用内 USB 设置".into());
     }
     Ok(())
@@ -68,19 +84,16 @@ fn validate_confirmation(confirmed: bool) -> Result<(), String> {
 pub async fn firmware_install_usb_support(
     app: AppHandle,
     confirmed: bool,
+    sticks3: Option<bool>,
 ) -> Result<String, String> {
-    validate_confirmation(confirmed)?;
+    let sticks3 = sticks3.unwrap_or(false);
+    validate_confirmation(confirmed, sticks3)?;
     let guard = reserve(&app)?;
     let state = app.state::<FirmwareState>().inner().clone();
-    state.progress(
-        "usb-setup",
-        "等待系统管理员授权并设置 ST-Link USB 支持…",
-        0,
-        None,
-    );
+    state.progress("usb-setup", "等待系统管理员授权并设置 USB 支持…", 0, None);
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
-        let result = install_usb_support();
+        let result = install_usb_support(sticks3);
         match &result {
             Ok(message) => state.progress("complete", message, 1, Some(1)),
             Err(error) => state.progress("error", error, 0, None),
@@ -92,13 +105,19 @@ pub async fn firmware_install_usb_support(
 }
 
 #[cfg(target_os = "linux")]
-fn install_usb_support() -> Result<String, String> {
+fn install_usb_support(sticks3: bool) -> Result<String, String> {
+    let (rule, family) = if sticks3 {
+        (STICKS3_RULE, "sticks3")
+    } else {
+        (LINUX_RULE, "stlink")
+    };
     let output = std::process::Command::new("/usr/bin/pkexec")
-        .args(["/bin/sh", "-c", LINUX_SETUP, "wl1-stlink-setup", LINUX_RULE])
+        .args(["/bin/sh", "-c", LINUX_SETUP, "wl1-usb-setup", rule, family])
         .output()
         .map_err(|error| format!("无法启动系统授权: {error}。需要桌面系统提供 /usr/bin/pkexec 和 polkit 授权代理；请勿以 root 启动整个应用"))?;
     match output.status.code() {
-        Some(0) => Ok("ST-Link USB 权限规则已设置。请重新插拔 ST-Link，再点击刷新；仅当前活动的本地桌面用户获得访问权限。".into()),
+        Some(0) if sticks3 => Ok("StickS3 USB 权限规则已设置并应用到当前设备；请点击刷新烧录器。".into()),
+        Some(0) => Ok("USB 权限规则已设置。请重新插拔烧录器，再点击刷新；仅当前活动的本地桌面用户获得访问权限。".into()),
         Some(126 | 127) => Err("系统授权已取消、被拒绝或授权代理不可用；未完成 USB 设置。可在准备好后重试。".into()),
         _ => Err(format!(
             "USB 权限设置未完成: {}。请让管理员检查同名规则及 udev 服务后重试",
@@ -145,8 +164,11 @@ fn windows_exit_message(code: Option<i32>) -> Result<String, String> {
 }
 
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-fn install_usb_support() -> Result<String, String> {
+fn install_usb_support(sticks3: bool) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
+    if sticks3 {
+        return Err("StickS3 使用系统 WinUSB，无需安装 ST-Link 驱动".into());
+    }
     if crate::firmware_image::sha256(DRIVER) != DRIVER_SHA256 {
         return Err("内置 ST-Link 驱动完整性校验失败，拒绝安装".into());
     }
@@ -178,7 +200,7 @@ fn install_usb_support() -> Result<String, String> {
     target_os = "linux",
     all(target_os = "windows", target_arch = "x86_64")
 )))]
-fn install_usb_support() -> Result<String, String> {
+fn install_usb_support(_sticks3: bool) -> Result<String, String> {
     Err("当前平台不提供应用内 USB 设置".into())
 }
 
@@ -203,17 +225,19 @@ mod tests {
         assert_eq!(crate::firmware_image::sha256(DRIVER), DRIVER_SHA256);
         assert!(LICENSE.contains(DRIVER_SHA256));
         assert!(LICENSE.contains("SLA0048 Rev4/March 2018"));
-        assert!(firmware_usb_support()
+        assert!(firmware_usb_support(None)
             .license
             .contains("STMicroelectronics"));
     }
 
     #[test]
     fn no_confirmation_cannot_start_setup() {
-        assert!(validate_confirmation(false).unwrap_err().contains("确认"));
+        assert!(validate_confirmation(false, false)
+            .unwrap_err()
+            .contains("确认"));
         assert_eq!(
-            validate_confirmation(true).is_ok(),
-            firmware_usb_support().can_install
+            validate_confirmation(true, false).is_ok(),
+            firmware_usb_support(None).can_install
         );
     }
 
@@ -269,5 +293,10 @@ mod tests {
         assert!(!LINUX_RULE.contains("MODE="));
         assert!(LINUX_SETUP.contains("Refusing to overwrite"));
         assert!(LINUX_SETUP.contains("ln \"$staging\" \"$target\""));
+        assert!(LINUX_SETUP.contains("--attr-match=idVendor=303a --attr-match=idProduct=4004"));
+        assert!(LINUX_SETUP.contains("udevadm trigger --action=add --settle --subsystem-match=usb"));
+        assert!(STICKS3_RULE.contains("ATTR{idVendor}==\"303a\", ATTR{idProduct}==\"4004\""));
+        assert!(!STICKS3_RULE.contains("MODE="));
+        assert!(firmware_usb_support(Some(true)).license.is_empty());
     }
 }

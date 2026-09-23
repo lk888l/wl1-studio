@@ -7,14 +7,27 @@ export PATH
 umask 077
 test "$(id -u)" = 0 || { echo 'Administrator authorization is required.' >&2; exit 1; }
 command -v udevadm >/dev/null || { echo 'This system does not provide udevadm.' >&2; exit 1; }
-target=/etc/udev/rules.d/70-wl1-stlink.rules
+case "${2:-stlink}" in
+    stlink) family=stlink; target=/etc/udev/rules.d/70-wl1-stlink.rules ;;
+    sticks3) family=sticks3; target=/etc/udev/rules.d/70-wl1-sticks3.rules ;;
+    *) echo 'Unsupported USB device family.' >&2; exit 1 ;;
+esac
+apply_rules() {
+    udevadm control --reload-rules
+    if test "$family" = sticks3; then
+        # The user may install the rule after the DAP was already enumerated.
+        # Reapply it only to this VID:PID, then wait for its uaccess ACL.
+        udevadm trigger --action=add --settle --subsystem-match=usb \
+            --attr-match=idVendor=303a --attr-match=idProduct=4004
+    fi
+}
 mkdir -p /etc/udev/rules.d
 if test -e "$target" || test -L "$target"; then
     if test ! -L "$target" && test -f "$target" && printf '%s' "$1" | cmp -s - "$target"; then
-        udevadm control --reload-rules
+        apply_rules
         exit 0
     fi
-    echo 'Existing /etc/udev/rules.d/70-wl1-stlink.rules differs. Refusing to overwrite it; ask your administrator to review it.' >&2
+    echo "Existing $target differs. Refusing to overwrite it; ask your administrator to review it." >&2
     exit 1
 fi
 staging=$(mktemp /etc/udev/rules.d/.wl1-stlink.XXXXXX)
@@ -24,5 +37,5 @@ chown root:root "$staging"
 chmod 0644 "$staging"
 # Link rather than overwrite: another setup cannot replace a pre-existing rule.
 ln "$staging" "$target"
-udevadm control --reload-rules
-# Replugging the probe applies the rule. Do not trigger unrelated USB devices.
+apply_rules
+# The ST-Link rule follows the original replug workflow.

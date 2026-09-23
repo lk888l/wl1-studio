@@ -60,5 +60,7 @@
 .wl1-fw-dialog code { display: block; margin: 10px 0; overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }
 .wl1-fw-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .wl1-fw-confirm-ranges { max-height: 120px; overflow: auto; }
+.wl1-fw-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.wl1-fw-verify { margin-top: 10px; }
 @media (max-width: 1200px) { .wl1-fw-fields { grid-template-columns: 1fr 1fr; } .wl1-fw-probe { grid-column: 1 / -1; } .wl1-fw-hex table { font-size: 11px; } }
 @media (max-width: 800px) { .wl1-fw-operations { grid-template-columns: 1fr; } .wl1-fw-pager { flex-wrap: wrap; } }
