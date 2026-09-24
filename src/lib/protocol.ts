@@ -6,6 +6,23 @@ export type ParsedFirmwareLine =
   | { type: "servo"; angle: number; x: number; bias: number }
   | { type: "log"; text: string };
 
+export type RobotFeatureReply =
+  | { type: "uid"; uid: string }
+  | { type: "autoleg"; enabled: boolean; active: boolean };
+
+export function parseRobotFeatureReply(raw: string): RobotFeatureReply | null {
+  const line = raw.trim();
+  const uid = /^uid: ([0-9A-F]{24})$/.exec(line);
+  if (uid) return { type: "uid", uid: uid[1] ?? "" };
+  const autoleg = /^autoleg: enabled=([01]) active=([01])$/.exec(line);
+  if (autoleg) return { type: "autoleg", enabled: autoleg[1] === "1", active: autoleg[2] === "1" };
+  return null;
+}
+
+export function isReadOnlyFirmwareCommand(command: string): boolean {
+  return command.trim() === "uid" || command.trim() === "autoleg status";
+}
+
 const finite = (value: number) => Number.isFinite(value);
 
 export function parseFirmwareLine(raw: string): ParsedFirmwareLine {
@@ -95,6 +112,19 @@ export function validateFirmwareCommand(command: string, connectionTarget: Conne
   }
 
   const [name] = parts;
+  if (name === "uid") {
+    if (parts.length !== 1) return "uid 命令不接受参数";
+    return connectionTarget === "remote" ? "遥控器链路不回传小车 UID；请直连小车读取。" : null;
+  }
+  if (name === "autoleg") {
+    if (parts.length !== 2 || !["on", "off", "status"].includes(parts[1] ?? "")) {
+      return "自适应腿高命令只接受 autoleg on、off 或 status";
+    }
+    if (parts[1] === "status" && connectionTarget === "remote") {
+      return "遥控器链路不回传小车自适应腿高状态；请直连小车查询。";
+    }
+    return null;
+  }
   if (name === "legheight") {
     if (connectionTarget === "remote") return "遥控器模式的腿高由实体摇杆控制，周期 R 帧会覆盖 legheight；请直连小车调整。";
     return validateNumericCommand(parts, 44.5, 78.5, "腿高");

@@ -175,10 +175,22 @@ pub fn validate_text_command(command: &str) -> Result<ValidatedCommand, String> 
     }
     let command_name = parts.first().copied().unwrap_or_default();
     let mut leg_height = None;
-    let requires_write_unlock = true;
+    let mut requires_write_unlock = true;
 
     match command_name {
         "R" => return Err("R 运动指令只能通过实时控制安全通道发送".into()),
+        "uid" => {
+            require_len(&parts, 1)?;
+            requires_write_unlock = false;
+        }
+        "autoleg" => {
+            require_len(&parts, 2)?;
+            match parts[1] {
+                "on" | "off" => {}
+                "status" => requires_write_unlock = false,
+                _ => return Err("自适应腿高命令只接受 autoleg on、off 或 status".into()),
+            }
+        }
         "legheight" => {
             require_len(&parts, 2)?;
             leg_height = Some(parse_in_range(parts[1], 44.5, 78.5, "腿高")?);
@@ -210,8 +222,13 @@ pub fn validate_text_command_for_target(
 ) -> Result<ValidatedCommand, String> {
     let validated = validate_text_command(command)?;
     if target == ConnectionTarget::Remote {
+        if !validated.requires_write_unlock {
+            return Err("遥控器链路不回传小车查询结果；请直连小车读取".into());
+        }
         if validated.leg_height.is_some() {
-            return Err("遥控器模式的腿高由实体摇杆控制；无线调参仅支持 PID 与俯仰偏置".into());
+            return Err(
+                "遥控器模式的腿高由实体摇杆控制；无线调参支持 PID、俯仰偏置和自适应腿高开关".into(),
+            );
         }
         if validated.text.len() > 31 {
             return Err("无线参数命令最多 31 字节，NRF24L01 帧需保留结尾空字节".into());
@@ -363,6 +380,23 @@ mod tests {
                 right: 10.25
             }
         );
+    }
+
+    #[test]
+    fn validates_uid_and_auto_leg_permissions() {
+        for command in ["uid", "autoleg status"] {
+            let validated = validate_text_command(command).unwrap();
+            assert!(!validated.requires_write_unlock);
+            assert!(validate_text_command_for_target(command, ConnectionTarget::Remote).is_err());
+        }
+        for command in ["autoleg on", "autoleg off"] {
+            let validated = validate_text_command(command).unwrap();
+            assert!(validated.requires_write_unlock);
+            assert!(validate_text_command_for_target(command, ConnectionTarget::Remote).is_ok());
+        }
+        for command in ["uid extra", "autoleg", "autoleg toggle", "autoleg on extra"] {
+            assert!(validate_text_command(command).is_err(), "{command}");
+        }
     }
 
     #[test]

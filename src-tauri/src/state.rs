@@ -157,7 +157,14 @@ impl AppState {
             schedule_fault_disconnect(app, session.session_id);
             return Err(reason);
         }
+        let mock_reply = match &session.writer {
+            SessionWriter::Mock(control) => mock_feature_reply(control, &command.text),
+            SessionWriter::Serial(_) => None,
+        };
         emit_console(app, session.session_id, "tx", command.text);
+        if let Some(reply) = mock_reply {
+            emit_console(app, session.session_id, "rx", reply);
+        }
         Ok(())
     }
 
@@ -227,6 +234,7 @@ struct MockControl {
     velocity: f64,
     roll: f64,
     height: f64,
+    auto_leg_enabled: bool,
 }
 
 impl Default for MockControl {
@@ -236,6 +244,7 @@ impl Default for MockControl {
             velocity: 0.0,
             roll: 0.0,
             height: 61.5,
+            auto_leg_enabled: true,
         }
     }
 }
@@ -515,8 +524,25 @@ fn update_mock_control(control: &Mutex<MockControl>, command: &str) {
                 }
                 state.height = height.clamp(44.5, 78.5);
             }
+        } else if name == "autoleg" {
+            match values.next() {
+                Some("on") => state.auto_leg_enabled = true,
+                Some("off") => state.auto_leg_enabled = false,
+                _ => {}
+            }
         }
     }
+}
+
+fn mock_feature_reply(control: &Mutex<MockControl>, command: &str) -> Option<String> {
+    if command == "uid" {
+        return Some("uid: 0123456789ABCDEF10203040".into());
+    }
+    if !command.starts_with("autoleg ") {
+        return None;
+    }
+    let enabled = control.lock().ok()?.auto_leg_enabled as u8;
+    Some(format!("autoleg: enabled={enabled} active={enabled}"))
 }
 
 const SERIAL_PENDING_LIMIT: usize = 4096;
@@ -910,6 +936,24 @@ mod tests {
             writes_unlocked: true,
             shutdown_started: false,
         }
+    }
+
+    #[test]
+    fn mock_feature_replies_follow_the_current_switch_state() {
+        let control = Mutex::new(MockControl::default());
+        assert_eq!(
+            mock_feature_reply(&control, "uid").as_deref(),
+            Some("uid: 0123456789ABCDEF10203040")
+        );
+        assert_eq!(
+            mock_feature_reply(&control, "autoleg status").as_deref(),
+            Some("autoleg: enabled=1 active=1")
+        );
+        update_mock_control(&control, "autoleg off");
+        assert_eq!(
+            mock_feature_reply(&control, "autoleg off").as_deref(),
+            Some("autoleg: enabled=0 active=0")
+        );
     }
 
     #[test]

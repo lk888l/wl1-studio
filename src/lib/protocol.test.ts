@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildMotionCommand,
   commandByteLength,
+  isReadOnlyFirmwareCommand,
   parseFirmwareLine,
+  parseRobotFeatureReply,
   validateFirmwareCommand,
 } from "./protocol";
 
@@ -75,6 +77,37 @@ describe("WL1 文本协议", () => {
     expect(validateFirmwareCommand("rollpid -p -1.0")).toBeNull();
     expect(validateFirmwareCommand("rollpid -i 10.1")).toContain("-10..=10");
     expect(validateFirmwareCommand("anglebias -20.1")).toContain("-20..=20");
+  });
+
+  it("只接受固件定义的 UID 与自适应腿高命令", () => {
+    for (const command of ["uid", "autoleg status", "autoleg on", "autoleg off"]) {
+      expect(validateFirmwareCommand(command)).toBeNull();
+    }
+    expect(isReadOnlyFirmwareCommand("uid")).toBe(true);
+    expect(isReadOnlyFirmwareCommand("autoleg status")).toBe(true);
+    expect(isReadOnlyFirmwareCommand("autoleg off")).toBe(false);
+    expect(validateFirmwareCommand("uid extra")).toContain("不接受参数");
+    expect(validateFirmwareCommand("autoleg toggle")).toContain("只接受");
+    expect(validateFirmwareCommand("autoleg on extra")).toContain("只接受");
+    expect(validateFirmwareCommand("uid", "remote")).toContain("不回传");
+    expect(validateFirmwareCommand("autoleg status", "remote")).toContain("不回传");
+    expect(validateFirmwareCommand("autoleg on", "remote")).toBeNull();
+    expect(validateFirmwareCommand("autoleg off", "remote")).toBeNull();
+  });
+
+  it("按固件回执解析 UID 和自适应腿高的设置与运行状态", () => {
+    expect(parseRobotFeatureReply("uid: 0123456789ABCDEF10203040\r\n")).toEqual({
+      type: "uid", uid: "0123456789ABCDEF10203040",
+    });
+    expect(parseRobotFeatureReply("autoleg: enabled=1 active=0")).toEqual({
+      type: "autoleg", enabled: true, active: false,
+    });
+    expect(parseRobotFeatureReply("autoleg: enabled=0 active=0")).toEqual({
+      type: "autoleg", enabled: false, active: false,
+    });
+    for (const line of ["uid: usage: uid", "uid: 0123", "autoleg: enabled=2 active=1", "autoleg: usage: autoleg on|off|status"]) {
+      expect(parseRobotFeatureReply(line)).toBeNull();
+    }
   });
 
   it("生成字段顺序固定的 R 命令", () => {

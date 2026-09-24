@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { commandByteLength, validateFirmwareCommand } from "../../lib/protocol";
+import { commandByteLength, isReadOnlyFirmwareCommand, validateFirmwareCommand } from "../../lib/protocol";
 import { isRemoteConnection } from "../../lib/connection";
 import type { ConnectionSnapshot, ConsoleDirection, ConsoleEntry } from "../../types";
 
@@ -55,6 +55,7 @@ export function DiagnosticsPage({
   const connected = connection.mode !== "disconnected";
   const remote = isRemoteConnection(connection);
   const validation = command ? validateFirmwareCommand(command, connection.connectionTarget ?? "robot") : null;
+  const commandAllowed = writesUnlocked || isReadOnlyFirmwareCommand(command);
   const visibleEntries = useMemo(() => entries.filter((entry) => {
     if (filter !== "all" && entry.direction !== filter) return false;
     return !query || entry.text.toLowerCase().includes(query.toLowerCase());
@@ -67,7 +68,11 @@ export function DiagnosticsPage({
   }, [visibleEntries.length]);
 
   const send = async (value = command): Promise<void> => {
-    if (!connected || !writesUnlocked || busy) return;
+    if (!connected || busy) return;
+    if (!writesUnlocked && !isReadOnlyFirmwareCommand(value)) {
+      setNotice("只读连接仅允许查询 uid 和 autoleg status。");
+      return;
+    }
     const error = validateFirmwareCommand(value, connection.connectionTarget ?? "robot");
     if (error) {
       setNotice(error);
@@ -139,9 +144,9 @@ export function DiagnosticsPage({
           </div>
 
           <form className="command-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span>&gt;</span><input aria-label="固件命令" value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? remote ? "例如 anglebias 12.6（不含换行）" : "输入单条固件命令，例如 legheight 44.5" : "只读连接已锁定命令发送"} disabled={!connected || !writesUnlocked || busy} onChange={(event) => setCommand(event.target.value)} />
+            <span>&gt;</span><input aria-label="固件命令" value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? remote ? "例如 autoleg off（不含换行）" : "输入单条固件命令，例如 uid" : remote ? "只读遥控器链路无法查询小车" : "只读连接可查询 uid 或 autoleg status"} disabled={!connected || busy} onChange={(event) => setCommand(event.target.value)} />
             <small className={validation ? "is-error" : ""}>{commandByteLength(command)}/{remote ? 31 : 32}</small>
-            <button className="primary-button" type="submit" disabled={!connected || !writesUnlocked || busy || !command.trim() || Boolean(validation)}><Send size={16} />发送</button>
+            <button className="primary-button" type="submit" disabled={!connected || !commandAllowed || busy || !command.trim() || Boolean(validation)}><Send size={16} />发送</button>
           </form>
           {validation && <div className="composer-error">{validation}</div>}
         </section>
@@ -161,7 +166,7 @@ export function DiagnosticsPage({
           </section>
 
           <section className="glass-card protocol-facts">
-            <div><span>传输</span><strong>115200 · 8-N-1</strong></div><div><span>目标</span><strong>{remote ? "遥控器串口桥接" : "小车本体 / 仿真"}</strong></div><div><span>小车执行 ACK</span><strong className="text-warning">不支持</strong></div><div><span>{remote ? "命令上限" : "队列"}</span><strong>{remote ? "31 bytes + 换行" : "4 × 32 bytes"}</strong></div>
+            <div><span>传输</span><strong>115200 · 8-N-1</strong></div><div><span>目标</span><strong>{remote ? "遥控器串口桥接" : "小车本体 / 仿真"}</strong></div><div><span>回执</span><strong>{remote ? "不回传小车回执" : "UID / autoleg 可查询"}</strong></div><div><span>{remote ? "命令上限" : "队列"}</span><strong>{remote ? "31 bytes + 换行" : "4 × 32 bytes"}</strong></div>
           </section>
         </aside>
       </div>

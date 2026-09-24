@@ -17,6 +17,7 @@ interface TuningPageProps {
   notice: string | null;
   controlPanel?: ReactNode;
   telemetryPanel?: ReactNode;
+  featurePanel?: ReactNode;
   onChange: (id: string, value: number) => void;
   onSendOne: (id: string) => void;
   onSendMany: (ids: string[]) => void;
@@ -84,7 +85,7 @@ function ParameterRow({ definition, value, previous, requested, sending, unavail
   );
 }
 
-export function TuningPage({ connected, remote = false, writesUnlocked, draft, applied, requestedIds, profiles, sending, notice, controlPanel, telemetryPanel, onChange, onSendOne, onSendMany, onRestoreAuto, onLoadProfile, onSaveProfile, onDeleteProfile, onResetDraft }: TuningPageProps) {
+export function TuningPage({ connected, remote = false, writesUnlocked, draft, applied, requestedIds, profiles, sending, notice, controlPanel, telemetryPanel, featurePanel, onChange, onSendOne, onSendMany, onRestoreAuto, onLoadProfile, onSaveProfile, onDeleteProfile, onResetDraft }: TuningPageProps) {
   const [editRevision, setEditRevision] = useState(0);
   const [profileName, setProfileName] = useState("");
   const [invalidIds, setInvalidIds] = useState<string[]>([]);
@@ -109,7 +110,8 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
       {notice && <div className="inline-notice" role="status"><Info size={17} />{notice}</div>}
       {!connected && <div className="workbench-hint">在顶部选择设备并连接即可下发；离线也可以编辑参数、保存档案。</div>}
       {connected && !writesUnlocked && <div className="readonly-banner">当前连接为只读，可查看遥测、编辑草稿和保存档案。</div>}
-      {remote && <div className="workbench-hint">遥控器模式可无线下发 PID 与重心偏置；运动和腿高使用实体摇杆，当前链路不回传遥测。</div>}
+      {remote && <div className="workbench-hint">遥控器模式可无线下发 PID、重心偏置与自适应腿高开关；运动和共同腿高使用实体摇杆，当前链路不回传遥测。</div>}
+      {featurePanel}
 
       <div className="workbench-layout">
         <div className="workbench-settings">

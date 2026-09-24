@@ -12,7 +12,7 @@ import type {
   TelemetrySample,
   TelemetrySubscription,
 } from "../types";
-import { buildMotionCommand, validateFirmwareCommand } from "./protocol";
+import { buildMotionCommand, isReadOnlyFirmwareCommand, validateFirmwareCommand } from "./protocol";
 import { isRemoteConnection, REMOTE_MOTION_UNAVAILABLE, REMOTE_TELEMETRY_UNAVAILABLE } from "./connection";
 import { mergeTelemetrySample } from "./telemetry";
 
@@ -86,6 +86,7 @@ export class DeviceGateway {
   private mockInterval: number | undefined;
   private mockStartedAt = 0;
   private mockMotion: MotionTarget = { turn: 0, velocity: 0, roll: 0, height: 61.5 };
+  private mockAutoLegEnabled = true;
   private lastTelemetry = nowSample();
   private unlisteners: UnlistenFn[] = [];
   private installingEvents: Promise<void> | undefined;
@@ -147,6 +148,7 @@ export class DeviceGateway {
 
     if (!tauri && config.mode === "mock") {
       this.mockMotion = { turn: 0, velocity: 0, roll: 0, height: 61.5 };
+      this.mockAutoLegEnabled = true;
       this.snapshot = {
         mode: "mock",
         connectionTarget: "robot",
@@ -237,7 +239,9 @@ export class DeviceGateway {
   async sendTextCommand(command: string, expectedSessionId?: number): Promise<void> {
     const error = validateFirmwareCommand(command, isRemoteConnection(this.snapshot) ? "remote" : "robot");
     if (error) throw new Error(error);
-    const sessionId = this.requireWritableSession(expectedSessionId);
+    const sessionId = isReadOnlyFirmwareCommand(command)
+      ? this.requireSession(expectedSessionId)
+      : this.requireWritableSession(expectedSessionId);
     const trimmed = command.trim();
     if (isTauriRuntime()) {
       await invoke("send_text_command", { command: trimmed, expectedSessionId: sessionId });
@@ -354,6 +358,17 @@ export class DeviceGateway {
   }
 
   private handleMockCommand(command: string): void {
+    if (command === "uid") {
+      this.emitConsole("rx", "uid: 0123456789ABCDEF10203040");
+      return;
+    }
+    if (command.startsWith("autoleg ")) {
+      if (command === "autoleg on") this.mockAutoLegEnabled = true;
+      if (command === "autoleg off") this.mockAutoLegEnabled = false;
+      const value = this.mockAutoLegEnabled ? 1 : 0;
+      this.emitConsole("rx", `autoleg: enabled=${value} active=${value}`);
+      return;
+    }
     const motion = /^R\s+([+-]?[\d.]+)\s+([+-]?[\d.]+)\s+([+-]?[\d.]+)\s+([+-]?[\d.]+)$/i.exec(command);
     if (motion) {
       const values = motion.slice(1).map(Number);

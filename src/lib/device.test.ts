@@ -60,6 +60,28 @@ describe("遥控器网关能力边界", () => {
     expect(gateway.connection.mode).toBe("serial");
   });
 
+  it("遥控器可发送自适应腿高开关，但不能查询无回传的状态或 UID", async () => {
+    const gateway = new DeviceGateway();
+    await gateway.connect(remoteConfig);
+    invoke.mockClear();
+    await gateway.sendTextCommand("autoleg off", 1);
+    await gateway.sendTextCommand("autoleg on", 1);
+    await expect(gateway.sendTextCommand("autoleg status", 1)).rejects.toThrow("不回传");
+    await expect(gateway.sendTextCommand("uid", 1)).rejects.toThrow("不回传");
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(["send_text_command", "send_text_command"]);
+  });
+
+  it("小车只读连接可以查询设备信息，但不能切换自适应腿高", async () => {
+    backendSnapshot = { ...backendSnapshot, connectionTarget: "robot", writesUnlocked: false };
+    const gateway = new DeviceGateway();
+    await gateway.connect({ ...remoteConfig, connectionTarget: "robot", allowUnsafeWrites: false });
+    invoke.mockClear();
+    await gateway.sendTextCommand("uid", 1);
+    await gateway.sendTextCommand("autoleg status", 1);
+    await expect(gateway.sendTextCommand("autoleg off", 1)).rejects.toThrow("只读");
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual(["send_text_command", "send_text_command"]);
+  });
+
   it("遥控器日志只作为日志，不把调试数值误当小车遥测", async () => {
     const gateway = new DeviceGateway();
     const events: DeviceEvent[] = [];
@@ -95,6 +117,31 @@ describe("遥控器网关能力边界", () => {
     const gateway = new DeviceGateway();
     await gateway.connect({ ...remoteConfig, allowUnsafeWrites: false });
     await expect(gateway.sendTextCommand("anglebias 12", 1)).rejects.toThrow("只读");
+  });
+});
+
+describe("浏览器 Mock 的固件功能回执", () => {
+  it("返回 UID，且自适应腿高回执随开关变化", async () => {
+    vi.stubGlobal("window", {
+      setInterval: vi.fn(() => 1),
+      clearInterval: vi.fn(),
+    });
+    const gateway = new DeviceGateway();
+    const received: string[] = [];
+    gateway.subscribe((event) => {
+      if (event.type === "console" && event.entry.direction === "rx") received.push(event.entry.text);
+    });
+    const snapshot = await gateway.connect({ mode: "mock", baudRate: 115200, allowUnsafeWrites: true });
+    await gateway.sendTextCommand("uid", snapshot.sessionId);
+    await gateway.sendTextCommand("autoleg status", snapshot.sessionId);
+    await gateway.sendTextCommand("autoleg off", snapshot.sessionId);
+    await gateway.sendTextCommand("autoleg status", snapshot.sessionId);
+    expect(received).toEqual([
+      "uid: 0123456789ABCDEF10203040",
+      "autoleg: enabled=1 active=1",
+      "autoleg: enabled=0 active=0",
+      "autoleg: enabled=0 active=0",
+    ]);
   });
 });
 
