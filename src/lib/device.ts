@@ -87,6 +87,9 @@ export class DeviceGateway {
   private mockStartedAt = 0;
   private mockMotion: MotionTarget = { turn: 0, velocity: 0, roll: 0, height: 61.5 };
   private mockAutoLegEnabled = true;
+  private mockRollBias = 0;
+  private mockParameters = new Map<string, number | string>();
+  private mockSavedParameters: string | undefined;
   private lastTelemetry = nowSample();
   private unlisteners: UnlistenFn[] = [];
   private installingEvents: Promise<void> | undefined;
@@ -149,6 +152,9 @@ export class DeviceGateway {
     if (!tauri && config.mode === "mock") {
       this.mockMotion = { turn: 0, velocity: 0, roll: 0, height: 61.5 };
       this.mockAutoLegEnabled = true;
+      this.mockRollBias = 0;
+      this.mockParameters.clear();
+      this.mockSavedParameters = undefined;
       this.snapshot = {
         mode: "mock",
         connectionTarget: "robot",
@@ -162,7 +168,7 @@ export class DeviceGateway {
       this.subscription = { imu: true, rpm: true };
       this.mockStartedAt = performance.now();
       this.startMock();
-      this.emitConsole("system", "Mock 设备已连接；遥测与命令发送日志已启用（无 ACK）");
+      this.emitConsole("system", "Mock 设备已连接；遥测与命令日志已启用，UID、自适应腿高及 Flash 保存提供模拟回执");
       return this.connection;
     }
 
@@ -358,6 +364,35 @@ export class DeviceGateway {
   }
 
   private handleMockCommand(command: string): void {
+    if (command === "save") {
+      const snapshot = JSON.stringify({
+        parameters: [...this.mockParameters.entries()].sort(([a], [b]) => a.localeCompare(b)),
+        autoLeg: this.mockAutoLegEnabled,
+        rollBias: this.mockRollBias,
+        roll: this.mockMotion.roll,
+        height: this.mockMotion.height,
+      });
+      const unchanged = snapshot === this.mockSavedParameters;
+      this.mockSavedParameters = snapshot;
+      this.emitConsole("rx", unchanged ? "save: unchanged (no flash write)" : "save: ok (all motion parameters)");
+      return;
+    }
+    if (command === "rollbias") {
+      const raw = this.lastTelemetry.roll;
+      this.emitConsole("rx", `rollbias base=${this.mockRollBias.toFixed(4)} raw=${raw.toFixed(4)} effective=${(raw + this.mockRollBias).toFixed(4)}`);
+      return;
+    }
+    if (command.startsWith("rollbias ")) {
+      this.mockRollBias = Number(command.slice(9));
+      return;
+    }
+    const pid = /^(anglepid|velocitypid|differpid|rollpid) (-[pid]) (.+)$/.exec(command);
+    if (pid) this.mockParameters.set(`${pid[1]} ${pid[2]}`, Number(pid[3]));
+    if (command === "anglepid auto") this.mockParameters.set("anglepid auto", "on");
+    if (pid?.[1] === "anglepid" && pid[2] === "-p") this.mockParameters.set("anglepid auto", "on");
+    if (command.startsWith("anglebias ")) {
+      this.mockParameters.set("anglebias", command === "anglebias auto" ? "auto" : Number(command.slice(10)));
+    }
     if (command === "uid") {
       this.emitConsole("rx", "uid: 0123456789ABCDEF10203040");
       return;
@@ -388,7 +423,7 @@ export class DeviceGateway {
       const height = Number(legHeight[1]);
       if (Number.isFinite(height)) this.mockMotion.height = height;
     }
-    // Legacy 固件没有通用 ACK；浏览器 Mock 与 Tauri Mock 都只记录 TX。
+    // 参数下发没有通用 ACK；只有明确支持回执的功能会产生 RX。
   }
 
   private async installTauriEvents(): Promise<void> {

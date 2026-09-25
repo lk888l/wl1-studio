@@ -20,7 +20,29 @@ export function parseRobotFeatureReply(raw: string): RobotFeatureReply | null {
 }
 
 export function isReadOnlyFirmwareCommand(command: string): boolean {
-  return command.trim() === "uid" || command.trim() === "autoleg status";
+  return command.trim() === "uid" || command.trim() === "autoleg status" || command.trim() === "rollbias";
+}
+
+export type FlashSaveReply =
+  | { status: "saved" | "unchanged" }
+  | { status: "error"; message: string; unconfirmed?: boolean };
+
+export function parseFlashSaveReply(raw: string): FlashSaveReply | null {
+  const line = raw.trim();
+  if (line === "save: ok (all motion parameters)") return { status: "saved" };
+  if (line === "save: unchanged (no flash write)") return { status: "unchanged" };
+  if (!line.startsWith("save:")) return null;
+  const errors: Record<string, string> = {
+    "save: usage: save [all|recycle]": "固件拒绝保存命令，请检查固件版本。",
+    "save: busy; system is starting": "小车正在启动，当前未保存；请启动完成后手动重试。",
+    "save: full; use save recycle to erase journal and save": "Flash 参数存储区已满，当前未保存；需要使用固件维护工具清理后再保存。",
+    "save: invalid parameters": "固件检测到无效参数，当前未保存；请检查已下发的参数。",
+    "save: flash error; RAM settings retained": "Flash 写入失败，参数仍保留在 SRAM，尚未确认断电保存。",
+    "save: busy; recycle requires stopped control, or another save is active": "固件正忙或已有保存操作，当前未保存；请稍后手动重试。",
+  };
+  return errors[line]
+    ? { status: "error", message: errors[line] }
+    : { status: "error", message: `固件未确认保存：${line}`, unconfirmed: true };
 }
 
 const finite = (value: number) => Number.isFinite(value);
@@ -112,6 +134,10 @@ export function validateFirmwareCommand(command: string, connectionTarget: Conne
   }
 
   const [name] = parts;
+  if (name === "save") {
+    if (parts.length !== 1) return "保存只接受无参数的 save 命令，不支持清理或擦除 Flash";
+    return connectionTarget === "remote" ? "遥控器链路不支持保存参数到 Flash；请通过串口或蓝牙直连小车。" : null;
+  }
   if (name === "uid") {
     if (parts.length !== 1) return "uid 命令不接受参数";
     return connectionTarget === "remote" ? "遥控器链路不回传小车 UID；请直连小车读取。" : null;
@@ -128,6 +154,11 @@ export function validateFirmwareCommand(command: string, connectionTarget: Conne
   if (name === "legheight") {
     if (connectionTarget === "remote") return "遥控器模式的腿高由实体摇杆控制，周期 R 帧会覆盖 legheight；请直连小车调整。";
     return validateNumericCommand(parts, 44.5, 78.5, "腿高");
+  }
+  if (name === "rollbias") {
+    if (connectionTarget === "remote") return "遥控器桥接不支持角度中心设置或查询；请通过串口或蓝牙直连小车。";
+    if (parts.length === 1) return null;
+    return validateNumericCommand(parts, -20, 20, "自适应腿高角度中心");
   }
   if (name === "anglebias") {
     if (parts.length === 2 && parts[1] === "auto") return null;

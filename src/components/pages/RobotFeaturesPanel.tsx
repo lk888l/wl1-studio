@@ -1,4 +1,4 @@
-import { Cpu, RadioTower, RotateCw } from "lucide-react";
+import { Cpu, RadioTower, RotateCw, Save } from "lucide-react";
 
 import { isRemoteConnection } from "../../lib/connection";
 import type { ConnectionSnapshot } from "../../types";
@@ -14,6 +14,10 @@ interface RobotFeaturesPanelProps {
   autoLeg: AutoLegStatus | null;
   busy: "uid" | "autoleg" | null;
   notice: string | null;
+  disabled?: boolean;
+  saving: boolean;
+  saveUnavailableReason: string | null;
+  onSaveToFlash: () => void;
   onReadUid: () => void;
   onReadAutoLeg: () => void;
   onSetAutoLeg: (enabled: boolean) => void;
@@ -25,14 +29,18 @@ export function RobotFeaturesPanel({
   autoLeg,
   busy,
   notice,
+  disabled = false,
+  saving,
+  saveUnavailableReason,
+  onSaveToFlash,
   onReadUid,
   onReadAutoLeg,
   onSetAutoLeg,
 }: RobotFeaturesPanelProps) {
   const connected = connection.mode !== "disconnected";
   const remote = isRemoteConnection(connection);
-  const canRead = connected && !remote && busy === null;
-  const canWrite = connected && connection.writesUnlocked && busy === null;
+  const canRead = connected && !remote && busy === null && !disabled;
+  const canWrite = connected && connection.writesUnlocked && busy === null && !disabled;
 
   return (
     <section className="workbench-features glass-card" aria-label="小车设备信息与自适应腿高">
@@ -63,8 +71,9 @@ export function RobotFeaturesPanel({
             </button>
             <button className="small-action" type="button" disabled={!canWrite} onClick={() => onSetAutoLeg(true)}>开启</button>
             <button className="small-action" type="button" disabled={!canWrite} onClick={() => onSetAutoLeg(false)}>关闭</button>
+            <button className="text-button workbench-save" type="button" disabled={!canWrite || Boolean(saveUnavailableReason)} title={saveUnavailableReason ?? "保存设备当前全部运动参数，包括自适应腿高开关"} onClick={onSaveToFlash}><Save size={14} />{saving ? "等待保存回执…" : "保存到 Flash"}</button>
           </div>
-          <small>{remote ? "无线发送后无法确认小车执行状态。" : "开关立即修改 RAM；断电保持需使用固件 save 保存整组参数。"}</small>
+          <small>{remote ? "无线发送后无法确认小车执行状态。" : "开关立即修改 RAM；点击“保存到 Flash”会连同设备当前全部运动参数一起保存。"}</small>
         </div>
       </div>
       {notice && <div className="inline-notice" role="status">{notice}</div>}

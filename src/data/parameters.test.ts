@@ -53,3 +53,32 @@ describe("VOFA 运动参数范围", () => {
     expect(buildParameterCommand(definition, -0.4)).toBe("rollpid -i -0.400");
   });
 });
+
+
+describe("自适应腿高角度中心参数", () => {
+  it("作为独立的机身参数提供主机调试范围和零度默认值", () => {
+    const definition = parameterDefinitions.find((entry) => entry.id === "rollBias");
+    expect(definition).toMatchObject({
+      group: "geometry", command: "rollbias", unit: "°", support: "supported",
+      min: -20, max: 20, step: 0.1, defaultValue: 0, decimals: 1,
+    });
+    if (!definition) throw new Error("缺少自适应腿高角度中心");
+    for (const value of [-20, -2.5, 0, 2.5, 20]) {
+      expect(buildParameterCommand(definition, value)).toBe(`rollbias ${value.toFixed(1)}`);
+      expect(validateFirmwareCommand(buildParameterCommand(definition, value) ?? "")).toBeNull();
+    }
+    for (const value of [-20.1, 20.1]) {
+      expect(validateFirmwareCommand(buildParameterCommand(definition, value) ?? "")).toContain("范围内");
+    }
+  });
+
+  it("档案保留主机范围边界并剔除超限角度中心", () => {
+    const profile = { id: "center", name: "角度中心", description: "主机范围", updatedAt: 1 };
+    for (const rollBias of [-20, 20]) {
+      expect(sanitizeProfiles([{ ...profile, values: { rollBias } }])[0]?.values).toEqual({ rollBias });
+    }
+    for (const rollBias of [-20.1, 20.1]) {
+      expect(sanitizeProfiles([{ ...profile, values: { rollBias, legHeight: 55 } }])[0]?.values).toEqual({ legHeight: 55 });
+    }
+  });
+});

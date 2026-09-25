@@ -5,6 +5,8 @@ import { formatParameterValue, parameterDefinitions, parameterGroups } from "../
 import type { ParameterDefinition, ParameterProfile, ParameterValues } from "../../types";
 import "./TuningPage.css";
 
+const bodyParameterIds = ["angleBias", "rollBias", "legHeight"];
+
 interface TuningPageProps {
   connected: boolean;
   remote?: boolean;
@@ -14,6 +16,9 @@ interface TuningPageProps {
   requestedIds: readonly string[];
   profiles: readonly ParameterProfile[];
   sending: boolean;
+  saving: boolean;
+  saveUnavailableReason: string | null;
+  saveNotice: string | null;
   notice: string | null;
   controlPanel?: ReactNode;
   telemetryPanel?: ReactNode;
@@ -21,6 +26,7 @@ interface TuningPageProps {
   onChange: (id: string, value: number) => void;
   onSendOne: (id: string) => void;
   onSendMany: (ids: string[]) => void;
+  onSaveToFlash: () => void;
   onRestoreAuto: (id: string) => void;
   onLoadProfile: (profile: ParameterProfile) => void;
   onSaveProfile: (name: string, description: string) => void;
@@ -64,7 +70,7 @@ function ParameterRow({ definition, value, previous, requested, sending, unavail
       <div className="workbench-parameter__label">
         <label htmlFor={`parameter-${definition.id}`} title={definition.description}>{label}</label>
         <span>{definition.symbol}</span>
-        <small title={previous === undefined ? "设备没有参数回读，显示的是本地草稿" : `最近请求 ${formatParameterValue(definition, previous)}${definition.unit ?? ""}`}>
+        <small title={previous === undefined ? "上位机尚未读取设备值，显示的是本地草稿" : `最近请求 ${formatParameterValue(definition, previous)}${definition.unit ?? ""}`}>
           {localOnly ? "仅本地" : previous === undefined ? "未下发" : pending ? "已修改" : requested ? "已请求" : "未确认"}
         </small>
       </div>
@@ -85,7 +91,7 @@ function ParameterRow({ definition, value, previous, requested, sending, unavail
   );
 }
 
-export function TuningPage({ connected, remote = false, writesUnlocked, draft, applied, requestedIds, profiles, sending, notice, controlPanel, telemetryPanel, featurePanel, onChange, onSendOne, onSendMany, onRestoreAuto, onLoadProfile, onSaveProfile, onDeleteProfile, onResetDraft }: TuningPageProps) {
+export function TuningPage({ connected, remote = false, writesUnlocked, draft, applied, requestedIds, profiles, sending, saving, saveUnavailableReason, saveNotice, notice, controlPanel, telemetryPanel, featurePanel, onChange, onSendOne, onSendMany, onSaveToFlash, onRestoreAuto, onLoadProfile, onSaveProfile, onDeleteProfile, onResetDraft }: TuningPageProps) {
   const [editRevision, setEditRevision] = useState(0);
   const [profileName, setProfileName] = useState("");
   const [invalidIds, setInvalidIds] = useState<string[]>([]);
@@ -95,7 +101,13 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
   const pidGroups = parameterGroups.filter((group) => group.id !== "geometry");
   const pendingPid = useMemo(() => parameterDefinitions.filter((item) => item.group !== "geometry" && item.support !== "reserved" && (applied[item.id] === undefined || Math.abs((draft[item.id] ?? item.defaultValue) - (applied[item.id] ?? 0)) > 1e-9)).map((item) => item.id), [applied, draft]);
   const row = (definition: ParameterDefinition): ReactNode => (
-    <ParameterRow key={`${definition.id}-${editRevision}`} definition={definition} value={draft[definition.id] ?? definition.defaultValue} previous={applied[definition.id]} requested={requestedIds.includes(definition.id)} sending={sending} unavailable={!writesUnlocked || (remote && definition.id === "legHeight")} onChange={onChange} onSend={onSendOne} onAuto={onRestoreAuto} onValidity={onValidity} />
+    <ParameterRow key={`${definition.id}-${editRevision}`} definition={definition} value={draft[definition.id] ?? definition.defaultValue} previous={applied[definition.id]} requested={requestedIds.includes(definition.id)} sending={sending} unavailable={!writesUnlocked || (remote && (definition.id === "legHeight" || definition.id === "rollBias"))} onChange={onChange} onSend={onSendOne} onAuto={onRestoreAuto} onValidity={onValidity} />
+  );
+
+  const saveButton = (label: string): ReactNode => (
+    <button className="text-button workbench-save" type="button" aria-label={label + "：保存设备参数到 Flash"} disabled={sending || saving || Boolean(saveUnavailableReason)} title={saveUnavailableReason ?? "保存设备当前全部可持久化参数，不下发本地草稿"} onClick={onSaveToFlash}>
+      <Save size={14} />{saving ? "等待保存回执…" : "保存到 Flash"}
+    </button>
   );
 
   return (
@@ -104,7 +116,7 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
         <div><span className="section-kicker">MOTION WORKBENCH</span><h1>运动工作台</h1><p>重心、腿高、PID 与方向控制，就在这一页。</p></div>
         <div className="heading-actions">
           <button className="secondary-button" type="button" disabled={sending} onClick={() => { setInvalidIds([]); setEditRevision((value) => value + 1); onResetDraft(); }}><RotateCcw size={16} />重置草稿</button>
-          <button className="primary-button" type="button" disabled={!writesUnlocked || sending || pendingPid.length === 0 || invalidIds.some((id) => parameterDefinitions.find((item) => item.id === id)?.group !== "geometry")} onClick={() => onSendMany(pendingPid)}><CloudUpload size={17} />{sending ? "正在下发…" : "下发待更新 PID"}<b>{pendingPid.length}</b></button>
+          <button className="primary-button" type="button" disabled={!writesUnlocked || sending || pendingPid.length === 0 || invalidIds.some((id) => parameterDefinitions.find((item) => item.id === id)?.group !== "geometry")} onClick={() => onSendMany(pendingPid)}><CloudUpload size={17} />{saving ? "正在保存…" : sending ? "处理中…" : "下发待更新 PID"}<b>{pendingPid.length}</b></button>
         </div>
       </section>
       {notice && <div className="inline-notice" role="status"><Info size={17} />{notice}</div>}
@@ -112,15 +124,21 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
       {connected && !writesUnlocked && <div className="readonly-banner">当前连接为只读，可查看遥测、编辑草稿和保存档案。</div>}
       {remote && <div className="workbench-hint">遥控器模式可无线下发 PID、重心偏置与自适应腿高开关；运动和共同腿高使用实体摇杆，当前链路不回传遥测。</div>}
       {featurePanel}
+      <div className="workbench-hint workbench-save-hint">
+        <strong>保存到设备：</strong>先下发并确认调试效果，再点击任一组的“保存到 Flash”。固件会一起保存当前设备的 PID、机身偏置、自适应腿高角度中心、共同腿高、自动模式和自适应腿高开关；未下发的草稿与本地轮半径不会写入设备。
+        {saveUnavailableReason && <span>{saveUnavailableReason}</span>}
+      </div>
+      {saveNotice && <div className="inline-notice" role="status"><Info size={17} />{saveNotice}</div>}
 
       <div className="workbench-layout">
         <div className="workbench-settings">
           <section className="workbench-group workbench-body glass-card" aria-label="机身重心与腿高">
-            <div className="workbench-group__heading"><div><span className="section-kicker">BODY & BALANCE</span><h2>机身与重心</h2></div><small>逐项下发，立即请求应用</small></div>
+            <div className="workbench-group__heading"><div><span className="section-kicker">BODY & BALANCE</span><h2>机身与重心</h2></div><div className="workbench-group__actions">{saveButton("机身与重心")}</div></div>
             <div className="workbench-body__parameters">
-              {["angleBias", "legHeight"].map((id) => parameterDefinitions.find((item) => item.id === id)).filter((item): item is ParameterDefinition => Boolean(item)).map(row)}
+              {bodyParameterIds.map((id) => parameterDefinitions.find((item) => item.id === id)).filter((item): item is ParameterDefinition => Boolean(item)).map(row)}
             </div>
-            {remote && <p className="workbench-footnote">腿高仅可编辑本地草稿；连接小车后才能下发。</p>}
+            <p className="workbench-footnote">角度中心是横滚零点偏置：原始横滚角 + 角度中心 = 补偿后横滚角。例如期望中点处原始角度为 +2.5°，则设置 −2.5°；下发后可随本组“保存到 Flash”一起保存。</p>
+            {remote && <p className="workbench-footnote">共同腿高和角度中心仅可编辑本地草稿；请直连小车后下发。</p>}
           </section>
           <div className="workbench-pid-grid">
             {pidGroups.map((group) => {
@@ -128,13 +146,13 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
               const pending = definitions.filter((item) => pendingPid.includes(item.id)).map((item) => item.id);
               return (
                 <section className="workbench-group glass-card" key={group.id} aria-label={`${group.label} PID`}>
-                  <div className="workbench-group__heading"><div><h2>{group.label}</h2><p>{group.description}</p></div><button className="text-button" type="button" disabled={!writesUnlocked || sending || pending.length === 0 || definitions.some((item) => invalidIds.includes(item.id))} onClick={() => onSendMany(pending)}>下发本组</button></div>
+                  <div className="workbench-group__heading"><div><h2>{group.label}</h2><p>{group.description}</p></div><div className="workbench-group__actions"><button className="text-button" type="button" disabled={!writesUnlocked || sending || pending.length === 0 || definitions.some((item) => invalidIds.includes(item.id))} onClick={() => onSendMany(pending)}>下发本组</button>{saveButton(group.label)}</div></div>
                   {definitions.map(row)}
                 </section>
               );
             })}
           </div>
-          <p className="workbench-footnote">修改数值只更新草稿，点击“下发”才发送。设备没有参数回读，“已请求”表示发送记录；参数在设备重启后失效。</p>
+          <p className="workbench-footnote">修改数值只更新草稿，点击“下发”才写入设备 RAM。“已请求”表示发送记录；只有收到固件保存成功回执，才表示设备已写入 Flash。保存依赖支持 save 的固件，不会自动重试。</p>
         </div>
         <aside className="workbench-live" aria-label="实时控制与反馈">{controlPanel}{telemetryPanel}</aside>
       </div>
@@ -144,7 +162,7 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
         <div className="workbench-details__content">
           <div className="section-title-row"><div><h2>本地参数档案</h2><p>载入只更新草稿，确认数值后再下发。</p></div><div className="profile-save"><input aria-label="新档案名称" value={profileName} maxLength={24} placeholder="新档案名称" disabled={sending} onChange={(event) => setProfileName(event.target.value)} /><button className="secondary-button" type="button" disabled={sending || invalidIds.length > 0 || !profileName.trim()} onClick={() => { onSaveProfile(profileName.trim(), "运动工作台参数草稿"); setProfileName(""); }}><Save size={16} />保存草稿</button></div></div>
           <div className="profile-grid">{profiles.map((profile) => <article className="profile-card" key={profile.id}><div className="profile-icon"><FolderOpen size={19} /></div><div><small>{profile.builtIn ? "内置参考" : new Date(profile.updatedAt).toLocaleDateString("zh-CN")}</small><strong>{profile.name}</strong><p>{profile.description}</p></div><button className="text-button" type="button" disabled={sending} onClick={() => { setInvalidIds([]); setEditRevision((value) => value + 1); onLoadProfile(profile); }}>载入</button>{!profile.builtIn && <button className="icon-button icon-button--danger" type="button" aria-label={`删除${profile.name}`} disabled={sending} onClick={() => onDeleteProfile(profile.id)}><Trash2 size={16} /></button>}</article>)}</div>
-          <div className="workbench-local-parameters">{parameterDefinitions.filter((item) => item.group === "geometry" && item.id !== "angleBias" && item.id !== "legHeight").map(row)}</div>
+          <div className="workbench-local-parameters">{parameterDefinitions.filter((item) => item.group === "geometry" && !bodyParameterIds.includes(item.id)).map(row)}</div>
           <details className="workbench-parameter-help"><summary>查看参数用途与固件说明</summary><dl>{parameterDefinitions.filter((item) => item.support !== "reserved").map((item) => <div key={item.id}><dt>{item.label} · {item.symbol}</dt><dd>{item.description}{item.warning && ` ${item.warning}`}</dd></div>)}</dl></details>
         </div>
       </details>

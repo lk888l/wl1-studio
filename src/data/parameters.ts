@@ -217,6 +217,23 @@ export const parameterDefinitions: ParameterDefinition[] = [
     warning: "参考固件将本项作为最低腿高的俯仰基准，再随腿高补偿；仅兼容扩展固件支持 anglebias auto。",
   },
   {
+    id: "rollBias",
+    group: "geometry",
+    label: "自适应腿高角度中心",
+    symbol: "Roll bias",
+    description: "自适应腿高使用的横滚零点偏置：补偿后横滚角 = 原始横滚角 + 本项。车身处于期望中点时，原始横滚角为 +2.5°，则设置 -2.5°。",
+    unit: "°",
+    // Host calibration range, matching angleBias; firmware only requires a finite float.
+    min: -20,
+    max: 20,
+    step: 0.1,
+    defaultValue: 0,
+    decimals: 1,
+    support: "supported",
+    command: "rollbias",
+    warning: "下发修改 RAM，保存到 Flash 后断电恢复。此偏置独立于实时横滚目标，自适应关闭时仍用于姿态门控。",
+  },
+  {
     id: "wheelRadius",
     group: "geometry",
     label: "轮半径",

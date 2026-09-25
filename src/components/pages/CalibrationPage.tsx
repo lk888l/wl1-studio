@@ -106,7 +106,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
       imuPitchBias: -average(sampleWindow.map((item) => item.pitch)),
       imuYawBias: -circularAverageDegrees(sampleWindow.map((item) => item.yaw)),
     }));
-    setNotice(`已从最近 ${sampleWindow.length} 帧计算本地偏置；当前固件尚无持久写入入口。`);
+    setNotice(`已从最近 ${sampleWindow.length} 帧计算本地偏置；IMU 标定偏置尚无设备写入接口。`);
   };
 
   const requestCommand = async (command: string): Promise<void> => {
@@ -127,7 +127,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
       setDraft(saved);
-      setNotice("标定记录已保存在本机。固件重启后仍需重新下发可写项。");
+      setNotice("标定记录已保存在本机。可写运动参数需另行下发，断电保持请在运动工作台保存到 Flash。");
     } catch {
       setNotice("无法写入本机存储；当前标定草稿仍保留在页面内存中。");
     }
@@ -163,7 +163,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
                 <label><input type="checkbox" /><span><strong>物理断电可触达</strong><small>软件停止无法替代电源急停。</small></span></label>
                 <label><input type="checkbox" /><span><strong>机身处于静止状态</strong><small>IMU 采样期间不要触碰机器人。</small></span></label>
               </div>
-              <div className="capability-strip"><Info size={18} /><p>本向导不会宣称“标定已写入 Flash”。当前固件在线参数都在 RAM 中，重启后丢失。</p></div>
+              <div className="capability-strip"><Info size={18} /><p>本向导只保存本地标定记录。可写运动参数下发后可在运动工作台保存到 Flash；IMU 标定偏置尚无设备写入接口。</p></div>
             </div>
           )}
 

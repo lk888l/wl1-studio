@@ -11,6 +11,8 @@
 
 进入 WL1 后默认打开运动工作台：机身重心、共同腿高、全部四组 PID、方向控制和遥测同页展示。顶部常驻连接区支持选择目标与串口、刷新和断开；记住上次串口，单串口时自动选择，不会自动连接。参数支持数字输入、滑块、逐项与按组下发；档案和本地几何参数折叠收纳。编辑只更新草稿，连接前后的有效草稿会保留；实时运动必须明确采用腿高并主动启用。
 
+机身与重心、四组 PID 和腿高自适应均提供“保存到 Flash”。先下发需要修改的值，再保存；每个入口都会保存车上全部运动参数的 SRAM 快照，不自动下发页面草稿。收到小车 `save: ok` 或 `save: unchanged` 后才显示成功；只读和遥控器连接不可用。固件要求、共同腿高等保存范围及错误处理见[参数保存指南](docs/parameter-flash-save.md)。
+
 范围及滑块步长同步 VOFA，TypeScript 与 Rust 使用相同命令边界。参考配置和已核实的固件版本差异见[运动参数范围说明](docs/motion-parameter-ranges.md)。
 
 WL1 现支持 **ZX-D30 单模 BLE 扫描连接与遥控**。选择蓝牙设备、允许本次连接写入后，在独立“实时遥控”页选择腿高并启用，使用 W/A/S/D、方向键或屏幕按钮按住移动；松手归零，空格 / Esc 停止，失焦后需重新启用。蓝牙采用 10 Hz 更新和 20 字节分包；连接与写入成功不等于设备确认执行。接线、固件要求、9600 baud 带宽限制与平台配置见[蓝牙遥控指南](docs/bluetooth-control.md)。
@@ -72,7 +74,7 @@ WL1 工作台可选择 **蓝牙 BLE、USB 串口** 或 **通过遥控器无线�
 - `showimu -y` 约以 100 Hz 输出：HEAD 是 `Roll,Pitch,Yaw`，当前工作树追加 `a=<|a|g>,ok=<0|1>`；解析器兼容两种。`showrpm -y` 仍约以 20 Hz 输出 `A: ... B: ...`；
 - `anglepid`、`velocitypid`、`differpid` 使用 `-p/-i/-d <value>`，`rollpid` 只支持 `-p/-i <value>`；
 - `R` **不是轮径**，而是格式严格为 `R <turn> <velocity> <roll> <height>` 的组合运动命令；`legheight` 的舵机任务限幅为 **44.5..78.5 mm**；
-- 调参值目前只保存在 **RAM**，重启或断电后会丢失。HEAD 会周期重算 Angle `Kp`/`anglebias`；当前工作树的数值命令会启用手动覆盖，并新增 `anglepid auto`/`anglebias auto` 恢复自动计算；
+- 调参先修改 **SRAM**；支持 `save` 的现行固件可通过“保存到 Flash”保存全部运动参数，未保存的修改在重启后丢失。旧 `8f8eb82` 基线及 2026-08-24 工作树的 RAM / 自动补偿语义保留在接入文档中，不能用于推断现行保存固件；
 - 当前工作树为有效 `R` 帧加入 250 ms 超时归零，HEAD 基线没有。由于没有能力握手，应用仍按“看门狗未知”处理，软件停止不能替代物理断电；
 - `R` 只能走类型化实时控制通道，诊断终端不能发送；每次连接必须明确选择腿高目标，旧会话的延迟任务和事件由 `sessionId` 隔离；
 - 固件尚无稳定的版本与能力协商协议，因此仍保留会话级写入权限与命令白名单校验；未解锁的会话只读，未知命令不得自动下发；
@@ -157,6 +159,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 
 - [系统架构](docs/architecture.md)
 - [固件接入](docs/firmware-integration.md)
+- [WL1 参数保存到 Flash](docs/parameter-flash-save.md)
 - [GameBox 游戏机接入](docs/gamebox-integration.md)
 - [PN532 NFC 门卡备份与写入](docs/nfc-pn532.md)
 - [Ubuntu 24.04 指南](docs/linux.md)
@@ -171,4 +174,4 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 - WL1 固件：[lk888l/wheeled-legged_Robot-WL1](https://github.com/lk888l/wheeled-legged_Robot-WL1)
 - 上位机技术参考：[hex-meow/hex-gui](https://github.com/hex-meow/hex-gui)
 
-项目中的命令语义以本地 WL1 的 `feature/framework@8f8eb82` 和 2026-08-24 尚未提交的工作树源码为双层基线；该工作树仍在变化，不能用 commit 唯一标识。任何后续改动都应重新核对 `commands.md`、`communication_module.cpp`、`motion_control_module.cpp` 并完成台架验证。
+Legacy 兼容记录以本地 WL1 的 `feature/framework@8f8eb82` 和 2026-08-24 尚未提交的工作树源码为双层基线；Flash 参数保存另按 `428f199` 与 2026-09-25 工作树核验，见参数保存指南；该工作树仍在变化，不能用 commit 唯一标识。任何后续改动都应重新核对 `commands.md`、`communication_module.cpp`、`motion_control_module.cpp` 并完成台架验证。

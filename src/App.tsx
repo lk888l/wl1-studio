@@ -40,6 +40,7 @@ import { sticks3Gateway } from "./lib/sticks3";
 import { BLUETOOTH_COMMAND_INTERVAL_MS, isBluetoothConnection, isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
 import { appendTelemetrySample, telemetryChannelFresh } from "./lib/telemetry";
 import { useRobotFeatures } from "./lib/use-robot-features";
+import { useParameterSave } from "./lib/use-parameter-save";
 import {
   defaultPersonalization,
   loadPersonalization,
@@ -331,6 +332,9 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   const writesUnlocked = connected && connection.writesUnlocked;
   const activeSessionId = connection.sessionId;
   const robotFeatures = useRobotFeatures(connection);
+  const parameterSave = useParameterSave(connection);
+  const saveToFlash = parameterSave.save;
+  const requestFlashSave = () => void saveToFlash().catch(() => undefined);
   const latest = samples.at(-1);
   const imuFresh = Boolean(connected && telemetryChannelFresh(latest?.imuTimestamp, freshnessNow));
   const rpmFresh = Boolean(connected && telemetryChannelFresh(latest?.rpmTimestamp, freshnessNow));
@@ -522,9 +526,13 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   }, []);
 
   const sendText = useCallback(async (command: string): Promise<void> => {
+    if (command.trim() === "save") {
+      await saveToFlash();
+      return;
+    }
     await deviceGateway.sendTextCommand(command, activeSessionId);
     recordParameterRequest(command);
-  }, [activeSessionId, recordParameterRequest]);
+  }, [activeSessionId, recordParameterRequest, saveToFlash]);
 
   const sendMotion = useCallback(async (target: MotionTarget): Promise<void> => {
     const command = motionCommand(target);
@@ -638,11 +646,11 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
   }, [activeSessionId]);
 
   const navigate = useCallback((next: PageId): void => {
-    if (firmwareBusy) return;
+    if (firmwareBusy || parameterSave.saving) return;
     if (next !== page) parameterOperation.current += 1;
     if (next === "firmware") setFirmwareVisited(true);
     setPage(next === "control" ? "tuning" : next);
-  }, [page, firmwareBusy]);
+  }, [page, firmwareBusy, parameterSave.saving]);
 
   const returnToProductHome = useCallback((): void => {
     if (connectionBusy || firmwareBusy) {
@@ -708,7 +716,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
           )}
           {page === "overview" && <OverviewPage connection={connection} samples={samples} imuFresh={imuFresh} rpmFresh={rpmFresh} robotName={personalization.robotName} ledColor={personalization.ledColor} compactTelemetry={personalization.compactTelemetry} onConnect={openConnection} onNavigate={navigate} />}
           {page === "kinematics" && <KinematicsPage />}
-          {page === "control" && !remote && <ControlPage commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
+          {page === "control" && !remote && <ControlPage commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || parameterSave.saving || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />}
           {firmwareVisited && <div hidden={page !== "firmware"}><FirmwarePage product="wl1" connected={connected} connectionBusy={connectionBusy || !startupReady} onBusyChange={setFirmwareBusy} /></div>}
           {page === "tuning" && <TuningPage featurePanel={
             <RobotFeaturesPanel
@@ -716,14 +724,18 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
               chipUid={robotFeatures.chipUid}
               autoLeg={robotFeatures.autoLeg}
               busy={robotFeatures.busy}
+              disabled={parameterSending || parameterSave.saving || connectionBusy}
+              saving={parameterSave.saving}
+              saveUnavailableReason={parameterSave.unavailableReason}
+              onSaveToFlash={requestFlashSave}
               notice={robotFeatures.notice}
               onReadUid={robotFeatures.readUid}
               onReadAutoLeg={robotFeatures.readAutoLeg}
               onSetAutoLeg={robotFeatures.setAutoLeg}
             />
-          } remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || connectionBusy} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
+          } remote={remote} connected={connected} writesUnlocked={writesUnlocked} draft={draftParameters} applied={appliedParameters} requestedIds={requestedParameterIds} profiles={profiles} sending={parameterSending || parameterSave.saving || robotFeatures.busy !== null || connectionBusy} saving={parameterSave.saving} saveUnavailableReason={parameterSave.unavailableReason} saveNotice={parameterSave.notice} onSaveToFlash={requestFlashSave} notice={parameterNotice} onChange={changeParameter} onSendOne={(id) => void sendParameter(id)} onSendMany={(ids) => void sendParameters(ids)} onRestoreAuto={(id) => void restoreAutomaticParameter(id)} onLoadProfile={(profile) => { setMotionHeight(null); setDraftParameters({ ...defaultParameterValues, ...profile.values }); setParameterNotice(`已载入“${profile.name}”到草稿区；设备值未知项也会列为待请求。`); }} onSaveProfile={saveProfile} onDeleteProfile={deleteProfile} onResetDraft={() => { setMotionHeight(null); setDraftParameters(mergeKnownParameterValues(appliedParameters)); }} controlPanel={!remote ? (<ControlPage compact commandIntervalMs={bluetooth ? BLUETOOTH_COMMAND_INTERVAL_MS : 50} suggestedHeight={draftParameters.legHeight} key={activeSessionId ?? "disconnected"} connected={connected} writesUnlocked={writesUnlocked} suspended={connectionBusy || parameterSending || parameterSave.saving || telemetryBusy || !startupReady} sample={imuFresh || rpmFresh ? latest : undefined} imuFresh={imuFresh} rpmFresh={rpmFresh} telemetryRequired={telemetryEnabled} telemetryHealthy={!telemetryEnabled || (imuFresh && rpmFresh)} lastCommand={lastMotionCommand} heightTarget={motionHeight?.value ?? null} heightRequested={motionHeight?.requested ?? false} onHeightTargetChange={(value) => setMotionHeight({ value, requested: false })} onSendMotion={sendMotion} />) : undefined} telemetryPanel={!remote ? (
             <section className="workbench-telemetry glass-card" aria-label="实时反馈">
-              <div className="workbench-telemetry__heading"><h2>实时反馈</h2><button className="text-button" type="button" disabled={!connected || connectionBusy || telemetryBusy || parameterSending} onClick={() => {
+              <div className="workbench-telemetry__heading"><h2>实时反馈</h2><button className="text-button" type="button" disabled={!connected || connectionBusy || telemetryBusy || parameterSending || parameterSave.saving} onClick={() => {
                 setTelemetryBusy(true); setTelemetryError(null);
                 void setTelemetry(!telemetryEnabled).catch((reason: unknown) => setTelemetryError(reason instanceof Error ? reason.message : String(reason))).finally(() => setTelemetryBusy(false));
               }}>{telemetryBusy ? "切换中…" : telemetryEnabled ? "关闭遥测" : "开启遥测"}</button></div>

@@ -44,6 +44,12 @@ VOFA 的 `target_value` 是保存配置时的控件位置，不能推定为固�
 
 本次仅只读核对参考仓库。未连接实机、未发送设备指令、未修改或烧录参考固件。
 
+## 2026-09-25 新增：自适应腿高角度中心
+
+依据当前固件 `Component/UserApp/Tasks/CommandServiceTask.cpp`、`MotionParameters.hpp` 和 `MotionPersistence.cpp`，新增 `rollBias` / `rollbias <degrees>`。它不来自上表旧 VOFA 配置：默认 0°，上位机范围 −20° 至 +20°，步长 0.1°；固件解析仅约束为完整有限浮点数，未规定这个上下限。
+
+计算关系为 `corrected_roll = raw_roll + roll_bias`；该参数独立于实时 `R.roll` / `target_roll`，不会被摇杆回中覆盖。裸 `rollbias` 为只读查询，数值形式需要写入权限。当前遥控桥接不转发本命令；串口和蓝牙直连可下发，随后通过现有 `save` 持久化，详见[参数保存指南](parameter-flash-save.md)。
+
 ## 回归验证
 
 - `src/data/parameters.test.ts`：VOFA 范围与步长、生成命令的边界通过和越界拒绝、扩展范围的档案恢复、横滚积分命令。

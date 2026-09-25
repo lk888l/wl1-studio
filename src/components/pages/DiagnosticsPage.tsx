@@ -70,7 +70,7 @@ export function DiagnosticsPage({
   const send = async (value = command): Promise<void> => {
     if (!connected || busy) return;
     if (!writesUnlocked && !isReadOnlyFirmwareCommand(value)) {
-      setNotice("只读连接仅允许查询 uid 和 autoleg status。");
+      setNotice("只读连接仅允许查询 uid、autoleg status 和 rollbias。");
       return;
     }
     const error = validateFirmwareCommand(value, connection.connectionTarget ?? "robot");
@@ -83,7 +83,8 @@ export function DiagnosticsPage({
     try {
       await onSend(value.trim());
       setCommand("");
-      if (remote) setNotice("已写入遥控器串口；小车是否收到或执行需现场确认。");
+      if (value.trim() === "save") setNotice(connection.mode === "mock" ? "已收到 Mock 保存回执；未写入真实设备。" : "已收到固件保存确认；写入或未变化的结果详见 RX 回执。");
+      else if (remote) setNotice("已写入遥控器串口；小车是否收到或执行需现场确认。");
     } catch (reason) {
       setNotice(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -144,7 +145,7 @@ export function DiagnosticsPage({
           </div>
 
           <form className="command-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-            <span>&gt;</span><input aria-label="固件命令" value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? remote ? "例如 autoleg off（不含换行）" : "输入单条固件命令，例如 uid" : remote ? "只读遥控器链路无法查询小车" : "只读连接可查询 uid 或 autoleg status"} disabled={!connected || busy} onChange={(event) => setCommand(event.target.value)} />
+            <span>&gt;</span><input aria-label="固件命令" value={command} autoComplete="off" spellCheck={false} placeholder={!connected ? "请先连接设备" : writesUnlocked ? remote ? "例如 autoleg off（不含换行）" : "输入单条固件命令，例如 uid" : remote ? "只读遥控器链路无法查询小车" : "只读连接可查询 uid、autoleg status 或 rollbias"} disabled={!connected || busy} onChange={(event) => setCommand(event.target.value)} />
             <small className={validation ? "is-error" : ""}>{commandByteLength(command)}/{remote ? 31 : 32}</small>
             <button className="primary-button" type="submit" disabled={!connected || !commandAllowed || busy || !command.trim() || Boolean(validation)}><Send size={16} />发送</button>
           </form>

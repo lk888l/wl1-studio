@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -148,10 +149,7 @@ impl AppState {
         let mut guard = self.session.lock().map_err(|_| "设备会话状态已损坏")?;
         let session = guard.as_mut().ok_or("请先连接设备")?;
         session.ensure_session_id(expected_session_id)?;
-        let command = validate_text_command_for_target(command, session.connection_target)?;
-        if command.requires_write_unlock && !session.writes_unlocked {
-            return Err("真实设备写入仍处于安全锁定；请断开后在连接页确认台架安全条件".into());
-        }
+        let command = session.validate_text_command(command)?;
         if let Err(reason) = session.send_validated_text(&command) {
             emit_disconnected(app, session.session_id, reason.clone());
             schedule_fault_disconnect(app, session.session_id);
@@ -233,8 +231,21 @@ struct MockControl {
     turn: f64,
     velocity: f64,
     roll: f64,
+    raw_roll: f64,
+    roll_bias: f64,
     height: f64,
     auto_leg_enabled: bool,
+    tuning_parameters: BTreeMap<String, String>,
+    saved_parameters: Option<MockParameterSnapshot>,
+}
+
+#[derive(Debug, PartialEq)]
+struct MockParameterSnapshot {
+    height: f64,
+    roll: f64,
+    roll_bias: f64,
+    auto_leg_enabled: bool,
+    tuning_parameters: BTreeMap<String, String>,
 }
 
 impl Default for MockControl {
@@ -243,8 +254,12 @@ impl Default for MockControl {
             turn: 0.0,
             velocity: 0.0,
             roll: 0.0,
+            raw_roll: 0.0,
+            roll_bias: 0.0,
             height: 61.5,
             auto_leg_enabled: true,
+            tuning_parameters: BTreeMap::new(),
+            saved_parameters: None,
         }
     }
 }
@@ -394,6 +409,14 @@ impl DeviceSession {
         Ok(())
     }
 
+    fn validate_text_command(&self, command: &str) -> Result<ValidatedCommand, String> {
+        let command = validate_text_command_for_target(command, self.connection_target)?;
+        if command.requires_write_unlock && !self.writes_unlocked {
+            return Err("真实设备写入仍处于安全锁定；请断开后在连接页确认台架安全条件".into());
+        }
+        Ok(command)
+    }
+
     fn ensure_motion_supported(&self) -> Result<(), String> {
         if self.connection_target == ConnectionTarget::Remote {
             return Err("遥控器模式由实体摇杆控制运动；上位机仅支持无线参数写入".into());
@@ -524,11 +547,37 @@ fn update_mock_control(control: &Mutex<MockControl>, command: &str) {
                 }
                 state.height = height.clamp(44.5, 78.5);
             }
+        } else if name == "rollbias" {
+            if let Some(Ok(roll_bias)) = values.next().map(str::parse::<f64>) {
+                if roll_bias.is_finite() {
+                    state.roll_bias = roll_bias;
+                }
+            }
         } else if name == "autoleg" {
             match values.next() {
                 Some("on") => state.auto_leg_enabled = true,
                 Some("off") => state.auto_leg_enabled = false,
                 _ => {}
+            }
+        } else if matches!(
+            name,
+            "anglebias" | "anglepid" | "velocitypid" | "differpid" | "rollpid"
+        ) {
+            let arguments = values.collect::<Vec<_>>();
+            let (key, value) = match arguments.as_slice() {
+                [value] => (name.to_owned(), *value),
+                [flag, value] => (format!("{name} {flag}"), *value),
+                _ => return,
+            };
+            // Normalize equivalent decimal input so reapplying the same value
+            // does not make the mock report another Flash write.
+            let value = value
+                .parse::<f64>()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|_| value.to_owned());
+            state.tuning_parameters.insert(key, value);
+            if name == "anglepid" && arguments.first() == Some(&"-p") {
+                state.tuning_parameters.remove("anglepid");
             }
         }
     }
@@ -537,6 +586,30 @@ fn update_mock_control(control: &Mutex<MockControl>, command: &str) {
 fn mock_feature_reply(control: &Mutex<MockControl>, command: &str) -> Option<String> {
     if command == "uid" {
         return Some("uid: 0123456789ABCDEF10203040".into());
+    }
+    if command == "rollbias" {
+        let state = control.lock().ok()?;
+        return Some(format!(
+            "rollbias base={:.4} raw={:.4} effective={:.4}",
+            state.roll_bias,
+            state.raw_roll,
+            state.raw_roll + state.roll_bias,
+        ));
+    }
+    if command == "save" {
+        let mut state = control.lock().ok()?;
+        let parameters = MockParameterSnapshot {
+            height: state.height,
+            roll: state.roll,
+            roll_bias: state.roll_bias,
+            auto_leg_enabled: state.auto_leg_enabled,
+            tuning_parameters: state.tuning_parameters.clone(),
+        };
+        if state.saved_parameters.as_ref() == Some(&parameters) {
+            return Some("save: unchanged (no flash write)".into());
+        }
+        state.saved_parameters = Some(parameters);
+        return Some("save: ok (all motion parameters)".into());
     }
     if !command.starts_with("autoleg ") {
         return None;
@@ -837,13 +910,17 @@ fn mock_device_loop(
                 .map(|state| (state.turn, state.velocity, state.roll, state.height))
                 .unwrap_or((0.0, 0.0, 0.0, 61.5));
             let wave = (seconds * 1.6).sin();
+            let raw_roll = roll_target + wave * 0.65;
+            if let Ok(mut state) = control.lock() {
+                state.raw_roll = raw_roll;
+            }
             let timestamp = unix_millis();
             let frame = TelemetryFrame {
                 session_id,
                 timestamp,
                 imu_timestamp: Some(timestamp),
                 rpm_timestamp: Some(timestamp),
-                roll: roll_target + wave * 0.65,
+                roll: raw_roll,
                 pitch: (seconds * 1.15).sin() * 1.15,
                 yaw: (seconds * 3.5).sin() * 4.0,
                 left_rpm: velocity + turn * 0.5 + wave * 1.2,
@@ -954,6 +1031,110 @@ mod tests {
             mock_feature_reply(&control, "autoleg off").as_deref(),
             Some("autoleg: enabled=0 active=0")
         );
+    }
+
+    #[test]
+    fn flash_save_permissions_reject_without_writing_or_disconnecting() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let mut session = failing_serial_session(Arc::clone(&writes));
+        session.writes_unlocked = false;
+        assert!(session.validate_text_command("save").is_err());
+        assert!(session.validate_text_command("uid").is_ok());
+        assert!(session.validate_text_command("rollbias").is_ok());
+        assert!(session.validate_text_command("rollbias 1.5").is_err());
+        assert_eq!(session.snapshot().mode, "serial");
+        assert!(writes.lock().unwrap().is_empty());
+
+        session.writes_unlocked = true;
+        assert!(session.validate_text_command("save").is_ok());
+        assert!(session.validate_text_command("rollbias 1.5").is_ok());
+        session.connection_target = ConnectionTarget::Remote;
+        assert!(session.validate_text_command("save").is_err());
+        assert!(session.validate_text_command("rollbias").is_err());
+        assert!(session.validate_text_command("rollbias 1.5").is_err());
+        assert_eq!(session.snapshot().mode, "serial");
+        assert!(writes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn mock_flash_save_reports_changes_across_parameter_groups() {
+        let control = Mutex::new(MockControl::default());
+        let saved = Some("save: ok (all motion parameters)");
+        let unchanged = Some("save: unchanged (no flash write)");
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), saved);
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), unchanged);
+        for command in [
+            "anglebias 12",
+            "rollbias 1.5",
+            "anglepid -p 80",
+            "velocitypid -i 0.02",
+            "differpid -p 3",
+            "rollpid -i -0.3",
+            "autoleg off",
+            "legheight 60",
+            "R 0 0 1 60",
+        ] {
+            update_mock_control(&control, command);
+            assert_eq!(
+                mock_feature_reply(&control, "save").as_deref(),
+                saved,
+                "{command}"
+            );
+            assert_eq!(
+                mock_feature_reply(&control, "save").as_deref(),
+                unchanged,
+                "{command}"
+            );
+        }
+        // Queries and changes to the live speed/turn targets are not persisted.
+        for command in [
+            "uid",
+            "autoleg status",
+            "rollbias",
+            "rollbias 1.500",
+            "R 10 20 1 60",
+            "anglepid -p 80.00",
+        ] {
+            update_mock_control(&control, command);
+            assert_eq!(
+                mock_feature_reply(&control, "save").as_deref(),
+                unchanged,
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn mock_roll_center_is_persistent_and_independent_from_motion_targets_and_sensor_data() {
+        let control = Mutex::new(MockControl::default());
+        let saved = Some("save: ok (all motion parameters)");
+        let unchanged = Some("save: unchanged (no flash write)");
+        assert_eq!(
+            mock_feature_reply(&control, "rollbias").as_deref(),
+            Some("rollbias base=0.0000 raw=0.0000 effective=0.0000")
+        );
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), saved);
+        update_mock_control(&control, "rollbias 0");
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), unchanged);
+
+        update_mock_control(&control, "rollbias 1.5");
+        assert!(mock_feature_reply(&control, "rollbias 1.5").is_none());
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), saved);
+        update_mock_control(&control, "rollbias 1.500");
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), unchanged);
+
+        control.lock().unwrap().raw_roll = -2.0;
+        assert_eq!(
+            mock_feature_reply(&control, "rollbias").as_deref(),
+            Some("rollbias base=1.5000 raw=-2.0000 effective=-0.5000")
+        );
+        assert_eq!(mock_feature_reply(&control, "save").as_deref(), unchanged);
+        update_mock_control(&control, "R 0 0 5 61.5");
+        assert_eq!(
+            mock_feature_reply(&control, "rollbias").as_deref(),
+            Some("rollbias base=1.5000 raw=-2.0000 effective=-0.5000")
+        );
+        assert_eq!(control.lock().unwrap().roll, 5.0);
     }
 
     #[test]

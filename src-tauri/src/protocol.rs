@@ -183,6 +183,7 @@ pub fn validate_text_command(command: &str) -> Result<ValidatedCommand, String> 
             require_len(&parts, 1)?;
             requires_write_unlock = false;
         }
+        "save" => require_len(&parts, 1)?,
         "autoleg" => {
             require_len(&parts, 2)?;
             match parts[1] {
@@ -199,6 +200,15 @@ pub fn validate_text_command(command: &str) -> Result<ValidatedCommand, String> 
             require_len(&parts, 2)?;
             if parts[1] != "auto" {
                 parse_in_range(parts[1], -20.0, 20.0, "俯仰静态偏置")?;
+            }
+        }
+        "rollbias" => {
+            if parts.len() == 1 {
+                requires_write_unlock = false;
+            } else {
+                require_len(&parts, 2)?;
+                // Host calibration range; firmware accepts any finite float.
+                parse_in_range(parts[1], -20.0, 20.0, "自适应腿高角度中心")?;
             }
         }
         "anglepid" if parts.as_slice() == ["anglepid", "auto"] => {}
@@ -222,6 +232,12 @@ pub fn validate_text_command_for_target(
 ) -> Result<ValidatedCommand, String> {
     let validated = validate_text_command(command)?;
     if target == ConnectionTarget::Remote {
+        if validated.text == "rollbias" || validated.text.starts_with("rollbias ") {
+            return Err("遥控器桥接固件不支持自适应腿高角度中心命令；请直连小车设置或查询".into());
+        }
+        if validated.text == "save" {
+            return Err("遥控器桥接固件不支持保存参数到 Flash；请直连小车保存".into());
+        }
         if !validated.requires_write_unlock {
             return Err("遥控器链路不回传小车查询结果；请直连小车读取".into());
         }
@@ -395,6 +411,56 @@ mod tests {
             assert!(validate_text_command_for_target(command, ConnectionTarget::Remote).is_ok());
         }
         for command in ["uid extra", "autoleg", "autoleg toggle", "autoleg on extra"] {
+            assert!(validate_text_command(command).is_err(), "{command}");
+        }
+    }
+
+    #[test]
+    fn flash_save_requires_write_access_and_a_direct_robot_connection() {
+        let validated = validate_text_command_for_target("save", ConnectionTarget::Robot).unwrap();
+        assert!(validated.requires_write_unlock);
+        assert_eq!(validated.leg_height, None);
+        assert_eq!(validated.text, "save");
+        assert!(
+            validate_text_command_for_target("save", ConnectionTarget::Remote)
+                .unwrap_err()
+                .contains("不支持保存")
+        );
+
+        // Recycle erases the parameter journal; never expose it as a normal save.
+        for command in ["save all", "save recycle", "save anglepid", "save\nuid"] {
+            assert!(validate_text_command(command).is_err(), "{command}");
+        }
+    }
+
+    #[test]
+    fn roll_center_supports_read_only_queries_and_bounded_direct_writes() {
+        let query = validate_text_command("rollbias").unwrap();
+        assert!(!query.requires_write_unlock);
+        assert_eq!(query.leg_height, None);
+        assert!(validate_text_command_for_target("rollbias", ConnectionTarget::Remote).is_err());
+
+        for value in ["-20", "-0.1", "0", "0.1", "20"] {
+            let command = format!("rollbias {value}");
+            let validated =
+                validate_text_command_for_target(&command, ConnectionTarget::Robot).unwrap();
+            assert!(validated.requires_write_unlock);
+            assert_eq!(validated.leg_height, None);
+            assert!(validate_text_command_for_target(&command, ConnectionTarget::Remote).is_err());
+        }
+        for command in [
+            "rollbias -20.1",
+            "rollbias 20.1",
+            "rollbias auto",
+            "rollbias status",
+            "rollbias NaN",
+            "rollbias inf",
+            "rollbias 1e1",
+            "rollbias +1",
+            "rollbias 1 2",
+            "rollbias  1",
+            "rollbias 0\nuid",
+        ] {
             assert!(validate_text_command(command).is_err(), "{command}");
         }
     }

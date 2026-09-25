@@ -48,7 +48,7 @@ The current compatibility scope has two layers: the committed HEAD baseline and 
 - `showimu -y` outputs at approximately 100 Hz: HEAD emits `Roll,Pitch,Yaw`, while the current working tree appends `a=<|a|g>,ok=<0|1>`. The parser supports both. `showrpm -y` still emits `A: ... B: ...` at approximately 20 Hz.
 - `anglepid`, `velocitypid`, and `differpid` use `-p/-i/-d <value>`; `rollpid` supports only `-p/-i <value>`.
 - `R` does **not** mean wheel radius. It is the strict combined-motion format `R <turn> <velocity> <roll> <height>`. The `legheight` servo task clamps height to **44.5..78.5 mm**.
-- Tuning values currently live only in **RAM** and are lost after restart or power-off. HEAD periodically recomputes angle `Kp`/`anglebias`; numeric commands in the current working tree enable a manual override, and `anglepid auto`/`anglebias auto` restore automatic calculation.
+- Tuning first updates **SRAM**. Firmware supporting `save` can persist the complete motion-parameter snapshot with **Save to Flash**; unsaved changes are lost after restart. The integration guide retains the older `8f8eb82` / 2026-08-24 RAM and compensation behavior as historical compatibility notes.
 - The current working tree adds a 250 ms zeroing timeout for valid `R` frames; the HEAD baseline does not. Because there is no capability handshake, the application still treats watchdog support as unknown. Stopping the desktop software is not a substitute for physical power isolation.
 - `R` can be sent only through the typed real-time control channel, not the diagnostics terminal. Every connection must explicitly choose a leg-height target, and `sessionId` isolates delayed tasks and events from older sessions.
 - The firmware has no stable version or capability-negotiation protocol. Session-level write permissions and command allowlists remain enforced. A session without write permission is read-only, and unknown commands are never sent automatically.
@@ -63,6 +63,8 @@ WL1's **Firmware & Flash** page uses embedded probe-rs over ST-Link/SWD, with th
 ## Motion workbench
 
 WL1 opens on one motion workbench with body pitch bias, leg height, all four PID groups, direction controls, and telemetry. The inline connection bar remembers the last serial port and selects a sole available port without connecting automatically. Numeric editors and sliders share parameter drafts; connecting preserves those drafts, while motion requires an explicitly chosen height and activation. Profiles and local geometry settings are available in an expandable section.
+
+The body/balance group, four PID groups, and adaptive leg-height settings offer **Save to Flash**. Send the intended values first, then save: every button persists all current motion parameters on the robot, including common leg height and roll target, without sending unsent editor drafts. Only `save: ok` or `save: unchanged` confirms success. Read-only sessions and remote-controller bridges cannot save. See the [parameter persistence guide](docs/parameter-flash-save.md) for firmware requirements, errors, the 10-second timeout, Mock behavior, and pending hardware validation.
 
 VOFA ranges and slider steps are applied consistently in the UI and TypeScript/Rust validators. See the [range and firmware reference notes](docs/motion-parameter-ranges.md) for source details and version differences.
 
@@ -151,6 +153,7 @@ The supporting guides are currently written in Simplified Chinese:
 
 - [System architecture](docs/architecture.md)
 - [Firmware integration](docs/firmware-integration.md)
+- [WL1 parameter persistence](docs/parameter-flash-save.md)
 - [GameBox integration](docs/gamebox-integration.md)
 - [PN532 NFC card backup and writing](docs/nfc-pn532.md)
 - [Ubuntu 24.04 guide](docs/linux.md)
@@ -165,4 +168,4 @@ The supporting guides are currently written in Simplified Chinese:
 - WL1 firmware: [lk888l/wheeled-legged_Robot-WL1](https://github.com/lk888l/wheeled-legged_Robot-WL1)
 - Host application reference: [hex-meow/hex-gui](https://github.com/hex-meow/hex-gui)
 
-Command semantics in this project use the local WL1 `feature/framework@8f8eb82` source and the uncommitted working tree as of 2026-08-24 as a two-layer baseline. Because that working tree is still changing, it cannot be identified by a commit alone. Recheck `commands.md`, `communication_module.cpp`, and `motion_control_module.cpp` and complete bench testing after every relevant change.
+Legacy compatibility notes use the local WL1 `feature/framework@8f8eb82` source and the uncommitted working tree as of 2026-08-24 as a two-layer baseline. Parameter persistence was separately checked against `428f199` and the uncommitted working tree inspected on 2026-09-25, as documented in the persistence guide. Because that working tree is still changing, it cannot be identified by a commit alone. Recheck `commands.md`, `communication_module.cpp`, and `motion_control_module.cpp` and complete bench testing after every relevant change.

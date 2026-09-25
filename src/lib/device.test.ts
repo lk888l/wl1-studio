@@ -200,3 +200,140 @@ describe("蓝牙设备会话", () => {
     await expect(gateway.sendMotionTarget({ turn: 0, velocity: 0, roll: 0, height: 60 })).rejects.toThrow("只读");
   });
 });
+
+
+describe("Flash 保存的网关权限与 Mock", () => {
+  it("串口与蓝牙直连允许 save，遥控器拒绝 save，且不能绕过只读权限", async () => {
+    const gateway = new DeviceGateway();
+    await gateway.connect(remoteConfig);
+    invoke.mockClear();
+    await expect(gateway.sendTextCommand("save", 1)).rejects.toThrow("遥控器链路不支持");
+    expect(invoke).not.toHaveBeenCalled();
+    for (const mode of ["serial", "ble"] as const) {
+      backendSnapshot = { ...backendSnapshot, mode, connectionTarget: "robot", writesUnlocked: true };
+      await gateway.connect({ ...remoteConfig, connectionTarget: "robot", mode, bleDeviceId: "WL1" });
+      await gateway.sendTextCommand("save", 1);
+      expect(invoke).toHaveBeenLastCalledWith("send_text_command", { command: "save", expectedSessionId: 1 });
+    }
+    backendSnapshot = { ...backendSnapshot, connectionTarget: "robot", writesUnlocked: false };
+    await gateway.connect({ ...remoteConfig, connectionTarget: "robot", allowUnsafeWrites: false });
+    invoke.mockClear();
+    await expect(gateway.sendTextCommand("save", 1)).rejects.toThrow("只读");
+    await expect(gateway.sendTextCommand("save recycle", 1)).rejects.toThrow("只接受无参数");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("Mock 返回真实格式且相同快照不重复写入，查询和速度目标不算持久参数", async () => {
+    vi.stubGlobal("window", { setInterval: vi.fn(() => 1), clearInterval: vi.fn() });
+    const gateway = new DeviceGateway();
+    const received: string[] = [];
+    gateway.subscribe((event) => {
+      if (event.type === "console" && event.entry.direction === "rx" && event.entry.text.startsWith("save:")) {
+        received.push(event.entry.text);
+      }
+    });
+    const connection = await gateway.connect({ mode: "mock", baudRate: 115200, allowUnsafeWrites: true });
+    const send = (command: string) => gateway.sendTextCommand(command, connection.sessionId);
+    await send("save");
+    await send("save");
+    await send("uid");
+    await send("autoleg status");
+    await gateway.sendMotionTarget({ turn: 10, velocity: 20, roll: 0, height: 61.5 }, connection.sessionId);
+    await send("save");
+    await send("anglepid -p 65");
+    await send("save");
+    await send("anglepid -p 65.0");
+    await send("save");
+    await send("autoleg off");
+    await send("save");
+    await send("legheight 55");
+    await send("save");
+    await gateway.sendMotionTarget({ turn: 0, velocity: 0, roll: 2, height: 55 }, connection.sessionId);
+    await send("save");
+    await send("save");
+    expect(received).toEqual([
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+      "save: unchanged (no flash write)",
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+      "save: ok (all motion parameters)",
+      "save: ok (all motion parameters)",
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+    ]);
+    await gateway.dispose();
+  });
+});
+
+
+describe("自适应腿高角度中心的网关权限与 Mock", () => {
+  it.each(["serial", "ble"] as const)("%s 只读连接允许查询，但设置必须拥有写权限", async (mode) => {
+    backendSnapshot = { ...backendSnapshot, mode, connectionTarget: "robot", writesUnlocked: false };
+    const gateway = new DeviceGateway();
+    await gateway.connect({ ...remoteConfig, mode, connectionTarget: "robot", bleDeviceId: "WL1", allowUnsafeWrites: false });
+    invoke.mockClear();
+    await gateway.sendTextCommand("rollbias", 1);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("send_text_command", { command: "rollbias", expectedSessionId: 1 });
+    await expect(gateway.sendTextCommand("rollbias 2.5", 1)).rejects.toThrow("只读");
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    backendSnapshot = { ...backendSnapshot, sessionId: 2, writesUnlocked: true };
+    await gateway.connect({ ...remoteConfig, mode, connectionTarget: "robot", bleDeviceId: "WL1" });
+    invoke.mockClear();
+    await expect(gateway.sendTextCommand("rollbias 2.5", 1)).rejects.toThrow("会话已变化");
+    await gateway.sendTextCommand("rollbias -2.5", 2);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("send_text_command", { command: "rollbias -2.5", expectedSessionId: 2 });
+    await gateway.dispose();
+  });
+
+  it("遥控器的角度中心设置和查询不能进入 IPC", async () => {
+    const gateway = new DeviceGateway();
+    await gateway.connect(remoteConfig);
+    invoke.mockClear();
+    await expect(gateway.sendTextCommand("rollbias", 1)).rejects.toThrow();
+    await expect(gateway.sendTextCommand("rollbias 2.5", 1)).rejects.toThrow();
+    expect(invoke).not.toHaveBeenCalled();
+    await gateway.dispose();
+  });
+
+  it("Mock 独立保存中心偏置，重复同值不写 Flash，R 帧不覆盖中心值", async () => {
+    vi.stubGlobal("window", { setInterval: vi.fn(() => 1), clearInterval: vi.fn() });
+    const gateway = new DeviceGateway();
+    const received: string[] = [];
+    gateway.subscribe((event) => {
+      if (event.type === "console" && event.entry.direction === "rx") received.push(event.entry.text);
+    });
+    const connection = await gateway.connect({ mode: "mock", baudRate: 115200, allowUnsafeWrites: true });
+    const send = (command: string) => gateway.sendTextCommand(command, connection.sessionId);
+    await send("save");
+    await send("rollbias 0");
+    await send("save");
+    await send("rollbias 2.5");
+    await send("save");
+    await send("rollbias 2.50");
+    await send("save");
+    await gateway.sendMotionTarget({ turn: 10, velocity: 20, roll: -4, height: 61.5 }, connection.sessionId);
+    await send("save");
+    await send("rollbias");
+    const centerReply = [...received].reverse().find((line) => line.startsWith("rollbias "));
+    expect(centerReply).toMatch(/^rollbias base=2\.5000 raw=[+-]?\d+\.\d{4} effective=[+-]?\d+\.\d{4}$/);
+    await send("rollbias 2.5");
+    await send("save");
+    await gateway.sendMotionTarget({ turn: -10, velocity: -20, roll: -4, height: 61.5 }, connection.sessionId);
+    await send("save");
+    await send("rollbias -2.5");
+    await send("save");
+    expect(received.filter((line) => line.startsWith("save:"))).toEqual([
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+      "save: ok (all motion parameters)",
+      "save: unchanged (no flash write)",
+      "save: unchanged (no flash write)",
+      "save: ok (all motion parameters)",
+    ]);
+    await gateway.dispose();
+  });
+});

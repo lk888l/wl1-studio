@@ -5,6 +5,7 @@ import {
   commandByteLength,
   isReadOnlyFirmwareCommand,
   parseFirmwareLine,
+  parseFlashSaveReply,
   parseRobotFeatureReply,
   validateFirmwareCommand,
 } from "./protocol";
@@ -120,5 +121,57 @@ describe("WL1 文本协议", () => {
     expect(() => buildMotionCommand({ turn: 101, velocity: 0, roll: 0, height: 50 })).toThrow("-100 到 100");
     expect(() => buildMotionCommand({ turn: 0, velocity: 0, roll: Number.NaN, height: 50 })).toThrow("有限数值");
     expect(() => buildMotionCommand({ turn: 0, velocity: 0, roll: 0, height: 0 })).toThrow("44.5 mm");
+  });
+});
+
+
+describe("Flash 保存协议", () => {
+  it("仅白名单允许直连的无参数 save 且必须拥有写权限", () => {
+    expect(validateFirmwareCommand("save")).toBeNull();
+    expect(isReadOnlyFirmwareCommand("save")).toBe(false);
+    expect(validateFirmwareCommand("save", "remote")).toContain("遥控器链路不支持");
+    for (const command of ["save all", "save recycle", "save extra"]) {
+      expect(validateFirmwareCommand(command)).toContain("只接受无参数");
+    }
+    expect(validateFirmwareCommand("save\nuid")).not.toBeNull();
+  });
+
+  it("仅精确成功回执可确认 Flash 写入", () => {
+    expect(parseFlashSaveReply("save: ok (all motion parameters)\r\n")).toEqual({ status: "saved" });
+    expect(parseFlashSaveReply("save: unchanged (no flash write)")).toEqual({ status: "unchanged" });
+    expect(parseFlashSaveReply("save: ok")).toMatchObject({ status: "error" });
+    expect(parseFlashSaveReply("save: ok (all motion parameters) trailing")).toMatchObject({ status: "error" });
+    expect(parseFlashSaveReply("prefix save: ok (all motion parameters)")).toBeNull();
+    expect(parseFlashSaveReply("save")).toBeNull();
+  });
+});
+
+
+describe("自适应腿高角度中心命令", () => {
+  it("直连允许只读查询和主机范围内的普通十进制设置", () => {
+    expect(validateFirmwareCommand("rollbias")).toBeNull();
+    expect(isReadOnlyFirmwareCommand("rollbias")).toBe(true);
+    for (const value of ["-20", "-2.5", "0", "2.5", "20", "0.0", ".5"]) {
+      const command = `rollbias ${value}`;
+      expect(validateFirmwareCommand(command)).toBeNull();
+      expect(isReadOnlyFirmwareCommand(command)).toBe(false);
+    }
+  });
+
+  it("拒绝超限、非法数字和多余参数", () => {
+    for (const value of ["-20.1", "20.1"]) {
+      expect(validateFirmwareCommand(`rollbias ${value}`)).toContain("范围内");
+    }
+    for (const value of ["NaN", "Infinity", "-Infinity", "1e1", "+2.5", "0x10", "auto", "status"]) {
+      expect(validateFirmwareCommand(`rollbias ${value}`)).not.toBeNull();
+    }
+    expect(validateFirmwareCommand("rollbias 1 2")).not.toBeNull();
+    expect(validateFirmwareCommand("rollbias  1")).not.toBeNull();
+    expect(validateFirmwareCommand("rollbias 1\nsave")).not.toBeNull();
+  });
+
+  it("遥控器桥接不支持查询或设置角度中心", () => {
+    expect(validateFirmwareCommand("rollbias", "remote")).not.toBeNull();
+    expect(validateFirmwareCommand("rollbias 2.5", "remote")).not.toBeNull();
   });
 });
