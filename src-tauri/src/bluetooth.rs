@@ -19,9 +19,11 @@ use crate::types::BluetoothDeviceOption;
 
 const PACKET_SIZE: usize = 20;
 const PACKET_GAP: Duration = Duration::from_millis(25);
-// Firmware expires incomplete @ frames after 300 ms. Fail the entire link on
-// timeout, so an old tail cannot precede a subsequent command.
-const FRAME_TIMEOUT: Duration = Duration::from_millis(200);
+// Match the mini-program's per-write timeout and queued-frame age. A late
+// partial frame must never be completed by a later BLE write.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_QUEUE_AGE: Duration = Duration::from_millis(350);
+const WRITE_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
@@ -171,25 +173,30 @@ fn uart_characteristics(
     Ok((write, notify, write_type))
 }
 
-async fn write_packets<F, Fut>(frame: &[u8], mut write: F) -> Result<(), String>
+async fn write_packets<F, Fut>(
+    frame: &[u8],
+    queued_at: tokio::time::Instant,
+    mut write: F,
+) -> Result<(), String>
 where
     F: FnMut(Vec<u8>) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
-    timeout(FRAME_TIMEOUT, async {
-        for packet in frame.chunks(PACKET_SIZE) {
-            write(packet.to_vec()).await?;
-            sleep(PACKET_GAP).await;
+    for (index, packet) in frame.chunks(PACKET_SIZE).enumerate() {
+        if index > 0 && queued_at.elapsed() > MAX_QUEUE_AGE {
+            return Err("蓝牙分片等待超过 350 ms，已取消剩余数据".into());
         }
-        Ok(())
-    })
-    .await
-    .map_err(|_| "蓝牙写入超过 200 ms，已中止连接，禁止补发旧命令".to_owned())?
+        timeout(WRITE_TIMEOUT, write(packet.to_vec()))
+            .await
+            .map_err(|_| "蓝牙单片写入超过 2 秒，连接已中止".to_owned())??;
+        sleep(PACKET_GAP).await;
+    }
+    Ok(())
 }
 
 struct WriteRequest {
     frame: String,
-    deadline: tokio::time::Instant,
+    queued_at: tokio::time::Instant,
     reply: mpsc::SyncSender<Result<(), String>>,
 }
 
@@ -247,10 +254,10 @@ impl BluetoothTransport {
                         request = requests.recv() => {
                             let Some(request) = request else { return Ok(()) };
                             if !actor_alive.load(Ordering::Acquire) { return Ok(()); }
-                            if tokio::time::Instant::now() >= request.deadline {
-                                return Err("蓝牙命令已过期，已丢弃并断开连接".into());
+                            if request.queued_at.elapsed() > MAX_QUEUE_AGE {
+                                return Err("蓝牙命令等待超过 350 ms，已丢弃并断开连接".into());
                             }
-                            let result = tokio::time::timeout_at(request.deadline, write_packets(request.frame.as_bytes(), |packet| {
+                            let result = write_packets(request.frame.as_bytes(), request.queued_at, |packet| {
                                 let peripheral = &peripheral;
                                 let write = &write;
                                 let alive = &actor_alive;
@@ -258,7 +265,7 @@ impl BluetoothTransport {
                                     if !alive.load(Ordering::Acquire) { return Err("蓝牙发送已取消".into()); }
                                     peripheral.write(write, &packet, write_type).await.map_err(|e| format!("蓝牙写入失败: {e}"))
                                 }
-                            })).await.unwrap_or_else(|_| Err("蓝牙命令超过 200 ms，连接已中止".into()));
+                            }).await;
                             let _ = request.reply.send(result.clone());
                             result?;
                         }
@@ -329,10 +336,10 @@ impl Transport for BluetoothTransport {
             .try_send(WriteRequest {
                 frame,
                 reply,
-                deadline: tokio::time::Instant::now() + FRAME_TIMEOUT,
+                queued_at: tokio::time::Instant::now(),
             })
             .map_err(|_| "蓝牙写入队列忙或连接已关闭")?;
-        match response.recv_timeout(Duration::from_millis(500)) {
+        match response.recv_timeout(WRITE_RESULT_TIMEOUT) {
             Ok(result) => result,
             Err(_) => {
                 self.link.alive.store(false, Ordering::Release);
@@ -438,7 +445,7 @@ mod tests {
     async fn packets_preserve_complete_frame_and_abort_on_failure() {
         let frame = uart_frame("R -100.0 -100.0 -18.0 78.5").unwrap();
         let mut packets = Vec::new();
-        write_packets(frame.as_bytes(), |packet| {
+        write_packets(frame.as_bytes(), tokio::time::Instant::now(), |packet| {
             packets.push(packet);
             async { Ok(()) }
         })
@@ -447,27 +454,59 @@ mod tests {
         assert_eq!(packets.concat(), frame.as_bytes());
         assert_eq!(packets[0].len(), 20);
         let mut writes = 0;
-        assert!(write_packets(frame.as_bytes(), |_| {
-            writes += 1;
-            async { Err("断开".into()) }
-        })
-        .await
-        .is_err());
+        assert!(
+            write_packets(frame.as_bytes(), tokio::time::Instant::now(), |_| {
+                writes += 1;
+                async { Err("断开".into()) }
+            })
+            .await
+            .is_err()
+        );
         assert_eq!(writes, 1);
     }
 
     #[tokio::test]
-    async fn timed_out_first_packet_never_sends_the_tail() {
+    async fn a_slow_single_packet_can_complete_after_200_ms() {
         let mut writes = 0;
-        let result = write_packets(&[b'a'; 34], |_| {
+        write_packets(b"@rollbias 0.0\n", tokio::time::Instant::now(), |_| {
             writes += 1;
             async {
-                sleep(Duration::from_secs(1)).await;
+                sleep(Duration::from_millis(400)).await;
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(writes, 1);
+    }
+
+    #[tokio::test]
+    async fn a_late_first_packet_never_sends_the_tail() {
+        let mut writes = 0;
+        let result = write_packets(&[b'a'; 34], tokio::time::Instant::now(), |_| {
+            writes += 1;
+            async {
+                sleep(Duration::from_millis(400)).await;
                 Ok(())
             }
         })
         .await;
-        assert!(result.unwrap_err().contains("200 ms"));
+        assert!(result.unwrap_err().contains("350 ms"));
+        assert_eq!(writes, 1);
+    }
+
+    #[tokio::test]
+    async fn a_timed_out_write_never_sends_the_tail() {
+        let mut writes = 0;
+        let result = write_packets(&[b'a'; 34], tokio::time::Instant::now(), |_| {
+            writes += 1;
+            async {
+                sleep(Duration::from_secs(3)).await;
+                Ok(())
+            }
+        })
+        .await;
+        assert!(result.unwrap_err().contains("2 秒"));
         assert_eq!(writes, 1);
     }
 
