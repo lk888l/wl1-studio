@@ -399,6 +399,30 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "Requires STICKS3_TEST_PORT and STICKS3_TEST_IP; reads USB status without changing Wi-Fi"]
+    fn hardware_usb_wifi_status() {
+        let port = std::env::var("STICKS3_TEST_PORT").expect("Set the authorized USB console port");
+        let ip = std::env::var("STICKS3_TEST_IP").expect("Set the expected device IP");
+        let state = StickS3State::default();
+        let connected = state.connect(&port).expect("USB capability handshake");
+        let session = connected.session_id.unwrap();
+        let status = state.request(session, RadioRequest::WifiStatus).unwrap();
+        assert_eq!(status["ok"], true);
+        assert_eq!(status["state"], "connected");
+        assert_eq!(status["ip"], ip);
+        let saved = state
+            .request(session, RadioRequest::WifiSaved { index: 0 })
+            .unwrap();
+        assert_eq!(saved["ok"], true);
+        assert!(saved["used_mask"].is_u64());
+        println!(
+            "USB capability handshake and Wi-Fi status passed: IP={ip}, used_mask={}",
+            saved["used_mask"]
+        );
+        assert!(!state.disconnect(Some(session)).unwrap().connected);
+    }
+
+    #[test]
     fn frames_only_rs_records_and_recovers_after_damage() {
         let mut framer = RecordFramer::default();
         let mut replies = Vec::new();

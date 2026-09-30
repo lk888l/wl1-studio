@@ -1,4 +1,4 @@
-//! ST-Link and CMSIS-DAP/SWD service. Jobs own USB on a blocking worker and
+//! ST-Link and CMSIS-DAP SWD/JTAG service. Jobs own USB/TCP on a blocking worker and
 //! reserve the product lifecycle before attaching. No probe-rs CLI is spawned.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,6 +21,7 @@ use crate::firmware_image::{
     PreparedImage, TargetSelection, FLASH_START,
 };
 use crate::firmware_target::{self, ResolvedTarget};
+use crate::sticks3_network::NetworkDevice;
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,7 +60,7 @@ impl FirmwareState {
         *status = FirmwareStatus {
             busy: true,
             stage: "connecting".into(),
-            message: "正在连接烧录器 / SWD…".into(),
+            message: "正在连接烧录器 / 调试端口…".into(),
             completed: 0,
             total: None,
         };
@@ -123,6 +124,27 @@ pub struct ProbeConfig {
     pub connect_under_reset: bool,
     #[serde(default)]
     pub expected_target: Option<TargetIdentity>,
+    #[serde(default)]
+    pub network: Option<NetworkDevice>,
+    #[serde(default)]
+    pub protocol: DebugProtocol,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DebugProtocol {
+    #[default]
+    Swd,
+    Jtag,
+}
+
+impl DebugProtocol {
+    fn wire(self) -> WireProtocol {
+        match self {
+            Self::Swd => WireProtocol::Swd,
+            Self::Jtag => WireProtocol::Jtag,
+        }
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -139,7 +161,21 @@ impl ProbeConfig {
             return Err("请刷新并选择 ST-Link 或 CMSIS-DAP 烧录器".into());
         }
         if ![100, 250, 400, 1000, 1800, 4000].contains(&self.speed_khz) {
-            return Err("SWD 频率不在支持的范围内".into());
+            return Err("调试频率不在支持的范围内".into());
+        }
+        if let Some(network) = &self.network {
+            network.validate()?;
+            if self.probe_id != network.probe_id() || self.chip != TargetSelection::AUTO {
+                return Err("无线探针与所选设备不匹配，请重新选择 StickS3".into());
+            }
+        } else if self.probe_id.starts_with("tcp:") {
+            return Err("无线探针缺少已核验的设备地址和序列号".into());
+        }
+        if self.protocol == DebugProtocol::Jtag
+            && self.network.is_none()
+            && !self.probe_id.starts_with("303a:4004:")
+        {
+            return Err("此工作台的 JTAG 操作仅支持 StickS3".into());
         }
         Ok(())
     }
@@ -157,6 +193,7 @@ pub struct ChipInfo {
     pub uid: String,
     pub speed_khz: u32,
     pub probe_id: String,
+    pub protocol: DebugProtocol,
 }
 
 #[derive(Serialize)]
@@ -210,7 +247,7 @@ fn discover_target(mut probe: Probe, under_reset: bool) -> Result<(Probe, Resolv
         if under_reset {
             let _ = probe.target_reset_deassert();
         }
-        return Err(detailed_error("无法初始化 SWD 自动识别", error));
+        return Err(detailed_error("无法初始化目标自动识别", error));
     }
     let mut interface = probe
         .try_into_arm_debug_interface(DefaultArmSequence::create())
@@ -218,7 +255,10 @@ fn discover_target(mut probe: Probe, under_reset: bool) -> Result<(Probe, Resolv
             if under_reset {
                 let _ = probe.target_reset_deassert();
             }
-            detailed_error("无法连接 ARM 调试接口，请检查供电和 SWD 接线", error)
+            detailed_error(
+                "无法连接 ARM 调试接口，请检查目标供电和所选 SWD/JTAG 接线",
+                error,
+            )
         })?;
     let detected = (|| {
         let mut memory = interface
@@ -252,25 +292,29 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
     config.validate()?;
     // Re-enumerate by identity, not list index. Duplicate clone serial numbers
     // are ambiguous and must never silently choose an arbitrary target.
-    let matches: Vec<_> = list_probes()
-        .into_iter()
-        .filter(|item| probe_id(&item.info) == config.probe_id)
-        .collect();
-    if matches.len() != 1 {
-        return Err("所选烧录器已拔出或存在重复序列号；请只连接一个匹配探针后刷新。StickS3 需要保持 USB DAP 开启".into());
-    }
-    let mut probe = matches[0].info.open().map_err(|error| {
-        format!(
+    let mut probe = if let Some(network) = &config.network {
+        crate::sticks3_network::open_probe(network)?
+    } else {
+        let matches: Vec<_> = list_probes()
+            .into_iter()
+            .filter(|item| probe_id(&item.info) == config.probe_id)
+            .collect();
+        if matches.len() != 1 {
+            return Err("所选烧录器已拔出或存在重复序列号；请只连接一个匹配探针后刷新。StickS3 需要保持 USB DAP 开启".into());
+        }
+        matches[0].info.open().map_err(|error| {
+            format!(
             "{}。请检查 USB 权限，并关闭占用探针的 OpenOCD / IDE；StickS3 使用 CMSIS-DAP / WinUSB",
             detailed_error("无法打开烧录器", error)
         )
-    })?;
+        })?
+    };
     probe
-        .select_protocol(WireProtocol::Swd)
-        .map_err(|error| detailed_error("无法选择 SWD", error))?;
+        .select_protocol(config.protocol.wire())
+        .map_err(|error| detailed_error("探针无法使用所选 SWD/JTAG 协议", error))?;
     let speed_khz = probe
         .set_speed(config.speed_khz)
-        .map_err(|error| detailed_error("无法设置 SWD 频率", error))?;
+        .map_err(|error| detailed_error("无法设置调试频率", error))?;
     let (probe, resolved) = if let Some(chip) = config.chip.fixed() {
         (probe, ResolvedTarget::fixed(chip))
     } else {
@@ -281,7 +325,7 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
         probe.attach_under_reset(resolved.target, Permissions::default())
     } else {
         probe.attach(resolved.target, Permissions::default())
-    }.map_err(|error| format!("{}。检查供电、GND/SWDIO/SWCLK；可降低 SWD 频率或连接 NRST 后启用复位连接。读保护不会自动解除", detailed_error("无法连接芯片", error)))?;
+    }.map_err(|error| format!("{}。检查目标供电与所选 SWD/JTAG 接线；可降低频率或连接 NRST 后启用复位连接。读保护不会自动解除", detailed_error("无法连接芯片", error)))?;
     let mut core = session
         .core(0)
         .map_err(|error| detailed_error("无法访问核心", error))?;
@@ -310,6 +354,7 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
         uid: uid.iter().map(|byte| format!("{byte:02X}")).collect(),
         speed_khz,
         probe_id: config.probe_id.clone(),
+        protocol: config.protocol,
     };
     drop(core);
     Ok((session, info))
@@ -332,6 +377,8 @@ fn check_confirmed_target(
 pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
     let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    app.state::<crate::sticks3_network::StickS3NetworkState>()
+        .ensure_idle()?;
     if app.state::<crate::state::AppState>().snapshot()?.mode != "disconnected"
         || app.state::<crate::gamebox::GameBoxState>().snapshot()?.mode
             != crate::gamebox::GameBoxMode::Disconnected
@@ -341,7 +388,7 @@ pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
             .snapshot()?
             .connected
     {
-        return Err("请先断开设备串口/演示/Mock 会话，再操作 SWD 固件".into());
+        return Err("请先断开设备串口/演示/Mock 会话，再操作目标固件".into());
     }
     app.state::<FirmwareState>().begin()
 }
@@ -544,7 +591,7 @@ fn execute_job(
         match operation {
             Operation::Identify => {
                 report.message =
-                    "芯片连接成功，已读取器件 ID、实际 Flash 容量与 UID；USB 已释放".into();
+                    "芯片连接成功，已读取器件 ID、实际 Flash 容量与 UID；探针连接已释放".into();
             }
             Operation::Read => {
                 let data = while_halted(&mut session, |session| {
@@ -775,6 +822,7 @@ mod tests {
             uid: "0102030405060708090A0B0C".into(),
             speed_khz: 100,
             probe_id: "303a:4004:fixture".into(),
+            protocol: DebugProtocol::Swd,
         };
         assert!(check_confirmed_target(None, &actual).is_err());
         let expected = TargetIdentity {
@@ -815,6 +863,34 @@ mod tests {
         drop(guard);
         assert_eq!(state.snapshot().stage, "complete");
         assert!(!state.snapshot().busy);
+    }
+
+    #[test]
+    fn network_configuration_binds_endpoint_and_serial_and_usb_defaults_stay_compatible() {
+        let legacy = serde_json::json!({ "probeId": "303a:4004:fixture", "chip": "auto", "speedKhz": 100, "connectUnderReset": false });
+        let config: ProbeConfig = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(config.protocol, DebugProtocol::Swd);
+        assert!(config.network.is_none());
+        assert!(config.validate().is_ok());
+        let mut wireless = legacy;
+        wireless["probeId"] = "tcp:172.18.7.163:4441:14C19FD536F4".into();
+        wireless["protocol"] = "jtag".into();
+        wireless["network"] =
+            serde_json::json!({ "host": "172.18.7.163", "port": 4441, "serial": "14C19FD536F4" });
+        let config: ProbeConfig = serde_json::from_value(wireless.clone()).unwrap();
+        assert!(config.validate().is_ok());
+        wireless["network"]["serial"] = "AABBCCDDEEFF".into();
+        assert!(serde_json::from_value::<ProbeConfig>(wireless.clone())
+            .unwrap()
+            .validate()
+            .is_err());
+        wireless["network"] = serde_json::Value::Null;
+        assert!(serde_json::from_value::<ProbeConfig>(wireless.clone())
+            .unwrap()
+            .validate()
+            .is_err());
+        wireless["protocol"] = "invalid".into();
+        assert!(serde_json::from_value::<ProbeConfig>(wireless).is_err());
     }
 
     #[test]

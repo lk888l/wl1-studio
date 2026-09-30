@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "./device";
 import { GAMEBOX_APPLICATION_BYTES } from "./gamebox-firmware";
+import type { DapProtocol, NetworkDevice, NetworkProbe } from "./sticks3-network";
 
 export const FLASH_START = 0x08000000;
 export const MAX_FIRMWARE_SIZE = 16 * 1024 * 1024;
@@ -35,6 +36,18 @@ export interface ProbeOption {
   name: string;
   serialNumber: string | null;
   accessible: boolean;
+  network?: NetworkDevice;
+  protocols?: DapProtocol[];
+}
+
+export function networkProbeOption(probe: NetworkProbe): ProbeOption {
+  return { id: `tcp:${probe.host}:${probe.port}:${probe.serial}`, name: `Wi-Fi · ${probe.host}:${probe.port}`,
+    serialNumber: probe.serial, accessible: true, network: { host: probe.host, port: probe.port, serial: probe.serial },
+    protocols: [...(probe.swd ? ["swd" as const] : []), ...(probe.jtag ? ["jtag" as const] : [])] };
+}
+
+export function mergeStickS3Probes(usb: ProbeOption[], network: readonly NetworkProbe[]): ProbeOption[] {
+  return [...usb.filter((probe) => probe.id.toLowerCase().startsWith("303a:4004:")), ...network.map(networkProbeOption)];
 }
 
 export interface ProbeConfig {
@@ -43,6 +56,8 @@ export interface ProbeConfig {
   speedKhz: number;
   connectUnderReset: boolean;
   expectedTarget?: Pick<ChipInfo, "deviceId" | "flashSize" | "uid">;
+  network?: NetworkDevice;
+  protocol?: DapProtocol;
 }
 
 export interface FirmwareImage {
@@ -77,10 +92,11 @@ export interface ChipInfo {
   uid: string;
   speedKhz: number;
   probeId: string;
+  protocol?: DapProtocol;
 }
 
 export function sameFlashTarget(a: ChipInfo, b: ChipInfo): boolean {
-  return a.probeId === b.probeId && a.deviceId === b.deviceId && a.flashSize === b.flashSize && a.uid === b.uid;
+  return a.probeId === b.probeId && (a.protocol ?? "swd") === (b.protocol ?? "swd") && a.deviceId === b.deviceId && a.flashSize === b.flashSize && a.uid === b.uid;
 }
 
 export function firmwareImageRangeError(summary: ImageSummary, flashSize: number | null): string | null {
@@ -107,7 +123,7 @@ export interface UsbSupport {
 }
 
 async function desktop<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauriRuntime()) throw new Error("SWD 烧录器需要桌面应用；浏览器预览不能访问 USB 或烧录固件。");
+  if (!isTauriRuntime()) throw new Error("调试烧录器需要桌面应用；浏览器预览不能访问真实设备或烧录固件。");
   return invoke<T>(command, args);
 }
 

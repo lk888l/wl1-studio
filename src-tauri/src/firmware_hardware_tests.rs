@@ -3,6 +3,45 @@ use super::*;
 use crate::firmware_image::ImageFormat;
 
 #[test]
+#[ignore = "Requires STICKS3_NO_TARGET=1, STICKS3_TEST_IP and STICKS3_TEST_SERIAL; no target may be wired"]
+fn sticks3_network_no_target_identification() {
+    assert_eq!(std::env::var("STICKS3_NO_TARGET").as_deref(), Ok("1"));
+    let device = NetworkDevice {
+        host: std::env::var("STICKS3_TEST_IP").unwrap(),
+        port: 4441,
+        serial: std::env::var("STICKS3_TEST_SERIAL").unwrap(),
+    };
+    for protocol in [DebugProtocol::Swd, DebugProtocol::Jtag] {
+        let config = ProbeConfig {
+            probe_id: device.probe_id(),
+            chip: TargetSelection::AUTO,
+            speed_khz: 100,
+            connect_under_reset: false,
+            expected_target: None,
+            network: Some(device.clone()),
+            protocol,
+        };
+        // Ensure an unreachable/offline probe cannot count as the expected no-target result.
+        drop(crate::sticks3_network::open_probe(&device).unwrap());
+        let state = FirmwareState::default();
+        let job = state.begin().unwrap();
+        let error = execute_job(&config, Operation::Identify, &state)
+            .err()
+            .expect("No target cannot report chip identity");
+        assert!(
+            error.contains("ARM 调试接口")
+                || error.contains("目标自动识别")
+                || error.contains("芯片识别寄存器"),
+            "{error}"
+        );
+        assert_eq!(state.snapshot().stage, "error");
+        drop(job);
+        assert!(!state.snapshot().busy);
+        println!("{protocol:?}: expected no-target failure, job released: {error}");
+    }
+}
+
+#[test]
 #[ignore = "Requires StickS3 + G431 and explicit WL1_SWD_* environment variables"]
 fn sticks3_g431_read_and_verify() {
     let probe_id = std::env::var("WL1_SWD_PROBE").expect("set the exact probe identity");
@@ -21,6 +60,8 @@ fn sticks3_g431_read_and_verify() {
             .unwrap(),
         connect_under_reset: false,
         expected_target: None,
+        network: None,
+        protocol: DebugProtocol::Swd,
     };
     let state = FirmwareState::default();
     let _job = state.begin().unwrap();
@@ -87,6 +128,8 @@ fn sticks3_automatic_capacity_read_and_verify() {
             .unwrap(),
         connect_under_reset: false,
         expected_target: None,
+        network: None,
+        protocol: DebugProtocol::Swd,
     };
     let state = FirmwareState::default();
     let _job = state.begin().unwrap();
@@ -143,6 +186,8 @@ fn sticks3_f103_auto_identify() {
         speed_khz: 100,
         connect_under_reset: false,
         expected_target: None,
+        network: None,
+        protocol: DebugProtocol::Swd,
     };
     let state = FirmwareState::default();
     let _job = state.begin().unwrap();

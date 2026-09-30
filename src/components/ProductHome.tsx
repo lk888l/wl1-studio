@@ -159,10 +159,10 @@ export function ProductHome({
                 </svg>
               </span>
               <span className="product-card__body">
-                <span className="product-card__meta"><span className="product-available"><i />USB 配网与烧录</span></span>
+                <span className="product-card__meta"><span className="product-available"><i />USB / Wi-Fi 调试与烧录</span></span>
                 <span className="product-card__title"><strong>StickS3 多功能终端</strong></span>
-                <span className="product-card__description">管理 Wi-Fi 与 BLE 连接，通过 USB DAP 查看目标 Flash、备份、烧写和校验固件。</span>
-                <span className="product-card__features"><span><Wifi size={15} />Wi-Fi 配网</span><span><Bluetooth size={15} />蓝牙连接</span><span><Cpu size={15} />SWD 烧录</span></span>
+                <span className="product-card__description">通过 USB 首次配网，按 IP 添加无线探针，在同一工作区选择 USB / Wi-Fi 与 SWD / JTAG，读取、烧写与校验目标 Flash。</span>
+                <span className="product-card__features"><span><Wifi size={15} />Wi-Fi 配网</span><span><Bluetooth size={15} />蓝牙连接</span><span><Cpu size={15} />SWD / JTAG</span></span>
                 <span className="product-card__action"><strong>{launching === "sticks3" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入 StickS3 工作台"}</strong><ArrowRight size={21} /></span>
               </span>
             </button>

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { firmwareApi, firmwareFormat, firmwareImageRangeError, FIRMWARE_TARGETS, FLASH_START, flashRows, hexAddress, parseFlashAddress, resolveFirmwareTarget, sameFlashTarget, type ChipInfo } from "./firmware";
+import { firmwareApi, firmwareFormat, firmwareImageRangeError, FIRMWARE_TARGETS, FLASH_START, flashRows, hexAddress, parseFlashAddress, resolveFirmwareTarget, sameFlashTarget, networkProbeOption, mergeStickS3Probes, type ChipInfo } from "./firmware";
+import type { NetworkProbe } from "./sticks3-network";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -151,5 +152,35 @@ describe("USB 设置须单独确认", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     invoke.mockRejectedValueOnce(new Error("已取消系统授权"));
     await expect(firmwareApi.installUsbSupport()).rejects.toThrow("已取消系统授权");
+  });
+});
+
+describe("USB 与无线共用 Flash 工作区", () => {
+  const probe: NetworkProbe = { host: "172.18.7.163", port: 4441, serial: "14C19FD536F4", vendor: "M5StickS3", product: "StickS3 CMSIS-DAP", firmwareVersion: "2.1.2", swd: true, jtag: true, packetSize: 64 };
+  it("USB 刷新保留无线设备，地址与序列号一起确定选择身份", () => {
+    const usb = { id: "303a:4004:usb", name: "StickS3", serialNumber: "usb", accessible: true };
+    const options = mergeStickS3Probes([usb, { ...usb, id: "0483:3748:other" }], [probe]);
+    expect(options).toHaveLength(2);
+    expect(options[0]).toEqual(usb);
+    expect(options[1]).toMatchObject({ id: "tcp:172.18.7.163:4441:14C19FD536F4", protocols: ["swd", "jtag"], network: { host: probe.host, port: probe.port, serial: probe.serial } });
+    expect(mergeStickS3Probes([], [probe])[0]).toEqual(options[1]);
+    expect(networkProbeOption({ ...probe, swd: false }).protocols).toEqual(["jtag"]);
+    expect(networkProbeOption({ ...probe, host: "192.168.4.1" }).id).not.toBe(options[1]?.id);
+  });
+  it("识别、读写、校验和擦除均携带同一无线端点及所选 JTAG 协议", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    invoke.mockResolvedValue(undefined);
+    const option = networkProbeOption(probe);
+    const config = { probeId: option.id, network: option.network, protocol: "jtag" as const, chip: "auto" as const, speedKhz: 100, connectUnderReset: false, expectedTarget: { deviceId: 0x410, flashSize: 65536, uid: "same-board" } };
+    const image = { chip: "auto" as const, format: "bin" as const, data: [1], baseAddress: FLASH_START };
+    await firmwareApi.identify(config); await firmwareApi.read(config); await firmwareApi.verify(config, image);
+    await firmwareApi.flash(config, image, "sha"); await firmwareApi.erase(config, "ERASE"); await firmwareApi.reset(config);
+    expect(invoke.mock.calls.map(([, args]) => args.config)).toEqual(Array(6).fill(config));
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["firmware_identify", "firmware_read", "firmware_verify", "firmware_flash", "firmware_erase", "firmware_reset"]);
+  });
+  it("切换调试协议使之前的芯片确认与 Flash 快照失效", () => {
+    const target: ChipInfo = { name: "STM32F1", target: "STM32F103C8Tx", deviceId: 0x410, revisionId: 0, flashStart: FLASH_START, flashSize: 65536, uid: "board", speedKhz: 100, probeId: networkProbeOption(probe).id, protocol: "swd" };
+    expect(sameFlashTarget(target, { ...target, protocol: "jtag" })).toBe(false);
+    expect(sameFlashTarget(target, { ...target, speedKhz: 250 })).toBe(true);
   });
 });

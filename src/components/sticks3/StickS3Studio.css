@@ -120,6 +120,20 @@
 .s3-services code { overflow-wrap: anywhere; padding: 9px 12px; background: #f3f6fb; border-radius: 8px; font-size: 11px; }
 .s3-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 25px; color: #8993a1; font-size: 10px; line-height: 1.8; }
 .s3-dap-guide { margin-top: 24px; }
+.s3-dap-tabs { margin-bottom: 24px; flex-wrap: wrap; }
+.s3-network-form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.s3-network-form .s3-field { flex: 1 1 220px; margin: 0; }
+.s3-network-form .s3-btn { min-height: 38px; }
+.s3-discovered { display: grid; gap: 9px; margin-top: 12px; }
+.s3-probe-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 20px 0 26px; }
+.s3-probe-facts dt { color: var(--s3-muted); font-size: 11px; }
+.s3-probe-facts dd { margin: 7px 0 0; font: 13px Consolas, monospace; overflow-wrap: anywhere; }
+.s3-config { padding: 15px; border: 1px solid var(--s3-line); border-radius: 11px; background: #f5f7fa; color: #536177; font: 11px/1.8 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.s3-protocol { display: flex; align-items: center; gap: 8px; color: var(--s3-muted); font-size: 11px; }
+.s3-protocol select { padding: 8px; border: 1px solid var(--s3-line); border-radius: 8px; background: white; color: var(--s3-ink); }
+.s3-setup-steps { display: flex; flex-wrap: wrap; gap: 10px; padding: 0; margin: 16px 0 0; list-style: none; }
+.s3-setup-steps li { padding: 9px 12px; border: 1px solid var(--s3-line); border-radius: 10px; color: var(--s3-muted); font-size: 11px; }
+.s3-setup-steps li.is-complete { background: #f0f8f3; border-color: #c5e4d7; color: #2b7d5e; }
 .s3-dap-guide > summary { cursor: pointer; color: var(--s3-muted); font-size: 13px; margin-bottom: 16px; }
 .s3-studio .wl1-firmware { --accent: var(--s3-accent); --accent-deep: #157b60; --accent-soft: #e8f7f0; }
 .s3-studio .wl1-firmware .page-heading { flex-wrap: wrap; gap: 16px; }

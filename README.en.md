@@ -9,18 +9,28 @@ This repository implements an extensible, multi-product desktop control applicat
 
 ## Current scope
 
-The **StickS3** workspace now includes a dedicated Wi-Fi / BLE connection page over the device's
-USB console: scanning, target selection, temporary connections, remember-after-success, four saved
-slots per radio, and BLE service discovery. Its SWD page provides USB CMSIS-DAP chip identification,
-full Flash reads, hex/ASCII browsing, address navigation, BIN backups, BIN/HEX/ELF/AXF programming,
-independent verification, main-Flash erase, and reset. Device ID and the Flash-size register automatically
-select a compatible configuration for medium-density STM32F1, STM32F411, or STM32G431.
-Reads, erase ranges and file checks use measured capacity, including a full 64 KiB when reported by an F103.
-The G431 desktop erase/blank-check/restore cycle passed, including an independent OpenOCD readback.
-USB DAP mode is selected on the device and replaces its USB configuration console. Wi-Fi/BLE DAP
-still uses separate OpenOCD/bridge tools. See the [StickS3 integration guide](docs/sticks3-integration.md)
-and [hardware validation record](docs/sticks3-swd-validation.md).
-The automatic-discovery path, F103 identification result, and remaining hardware checks are documented in the
+The **StickS3** workspace shares its existing Flash interface between USB and Wi-Fi probes,
+with device and SWD/JTAG selectors. Add a wireless device by IPv4 lookup or LAN discovery;
+successful identity verification opens the workspace and selects that probe. Keep W-DAP open
+on the device. Native Wi-Fi operations require no separately installed OpenOCD.
+
+The USB setup page provides Wi-Fi/BLE scanning, temporary connections, remember-after-success,
+four saved slots per radio, and BLE service discovery. It checks actual IP and save status
+and carries the acquired address into probe lookup. Passwords are not saved in desktop settings.
+
+The shared workspace supports chip identification, full Flash reads, hex/ASCII browsing,
+BIN backups, BIN/HEX/ELF/AXF programming, verification, main-Flash erase, and reset.
+Device ID and measured capacity select configurations for medium-density STM32F1,
+STM32F411, and STM32G431; JTAG also requires a compatible target.
+The G431 USB/SWD erase/blank-check/restore cycle passed, including independent OpenOCD readback.
+Wi-Fi SWD/JTAG initialization and expected identification failures without a target passed on
+`172.18.7.163`. Wireless target reads and writes still require validation with a target board.
+
+Select DAP mode on the device. USB DAP replaces the USB configuration console. Every Wi-Fi operation
+verifies the probe serial on the socket used by the shared engine; failures close it without replay.
+BLE DAP still uses separate bridge/OpenOCD tools. See the
+[StickS3 integration guide](docs/sticks3-integration.md),
+[USB hardware validation record](docs/sticks3-swd-validation.md), and
 [capacity discovery notes](docs/sticks3-swd-auto-detection.md).
 
 WL1 supports native **discovery and remote control for the BLE-only ZX-D30 module**. Each real connection starts read-only unless explicitly authorized; choose a leg height and enable control before holding W/A/S/D, arrows, or on-screen buttons. Release sends neutral, Space / Escape stops, and losing focus disarms control. Bluetooth uses 10 Hz updates and framed 20-byte BLE packets. See the [Bluetooth guide](docs/bluetooth-control.md) for SoftEngine firmware requirements, platform setup, and 9600-baud telemetry limits.

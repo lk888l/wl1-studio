@@ -1,12 +1,13 @@
 import { Bluetooth, Check, ChevronRight, Info, LockKeyhole, Radio, RefreshCw, Save, Search, Signal, Trash2, Wifi } from "lucide-react";
 import { useState } from "react";
 import { addressTypeLabel, bleStateLabel, sticks3Gateway, wifiCredentialError, wifiStateLabel, type BlePeripheral, type Radio as RadioKind, type RadioMemory, type RadioMutation, type S3Snapshot, type ScanResults, type WifiNetwork } from "../../lib/sticks3";
+import { wifiSetup } from "../../lib/sticks3-network";
 
 export type S3Run = (label: string, work: () => Promise<unknown>, message?: string) => Promise<boolean>;
-interface Props { snapshot: S3Snapshot; busy: boolean; run: S3Run }
+interface Props { snapshot: S3Snapshot; busy: boolean; run: S3Run; onNetwork: (ip: string) => void }
 const authLabel = (auth: number) => ["开放网络", "WEP", "WPA", "WPA2", "WPA/WPA2", "企业认证", "WPA3", "WPA2/WPA3"][auth] ?? `加密类型 ${auth}`;
 
-export function RadioConnections({ snapshot, busy, run }: Props) {
+export function RadioConnections({ snapshot, busy, run, onNetwork }: Props) {
   const [tab, setTab] = useState<RadioKind>("wifi");
   const data = snapshot.data;
   return <div className="s3-radio-page">
@@ -19,17 +20,18 @@ export function RadioConnections({ snapshot, busy, run }: Props) {
       <button type="button" id="s3-ble-tab" role="tab" aria-selected={tab === "ble"} aria-controls="s3-ble-panel" onClick={() => setTab("ble")}><Bluetooth size={17} />蓝牙 BLE</button>
     </div><button type="button" className="s3-btn" disabled={!snapshot.connected || busy} onClick={() => { void run("正在读取无线状态", () => sticks3Gateway.refresh()); }}><RefreshCw size={15} />刷新状态</button></div>
     {!snapshot.connected && <p className="s3-message"><Info size={17} />通过上方 USB 连接 S3，即可扫描、选择并保存它周围的 Wi-Fi 和 BLE 设备。</p>}
-    <div id="s3-wifi-panel" role="tabpanel" aria-labelledby="s3-wifi-tab" hidden={tab !== "wifi"}><WifiConnections {...{ snapshot, busy, run }} /></div>
-    <div id="s3-ble-panel" role="tabpanel" aria-labelledby="s3-ble-tab" hidden={tab !== "ble"}><BleConnections {...{ snapshot, busy, run }} /></div>
+    <div id="s3-wifi-panel" role="tabpanel" aria-labelledby="s3-wifi-tab" hidden={tab !== "wifi"}><WifiConnections {...{ snapshot, busy, run, onNetwork }} /></div>
+    <div id="s3-ble-panel" role="tabpanel" aria-labelledby="s3-ble-tab" hidden={tab !== "ble"}><BleConnections {...{ snapshot, busy, run, onNetwork }} /></div>
   </div>;
 }
 
-function WifiConnections({ snapshot, busy, run }: Props) {
+function WifiConnections({ snapshot, busy, run, onNetwork }: Props) {
   const [results, setResults] = useState<ScanResults<WifiNetwork>>();
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const status = snapshot.data?.wifi;
+  const setup = wifiSetup(snapshot);
   const supported = snapshot.capabilities?.wifi === true;
   const disabled = !snapshot.connected || busy || !supported;
   const blocked = disabled || !status?.enabled || status.scanning;
@@ -41,6 +43,11 @@ function WifiConnections({ snapshot, busy, run }: Props) {
     await sticks3Gateway.refresh();
   });
   return <>
+    <section className="s3-card s3-setup" aria-label="首次 Wi-Fi 配网" aria-live="polite">
+      <div className="s3-card-heading"><div><h2>首次 Wi-Fi 配网</h2><p>{setup.message}</p></div>{setup.ip && <button type="button" className="s3-btn is-primary" disabled={busy} onClick={() => onNetwork(setup.ip)}><ChevronRight size={16} />使用 {setup.ip} 查找调试器</button>}</div>
+      <ol className="s3-setup-steps"><li className={snapshot.connected ? "is-complete" : ""}>1 · 连接 USB 控制台</li><li className={setup.ip ? "is-complete" : ""}>2 · 连接 Wi-Fi 并取得 IP</li><li className={setup.saved ? "is-complete" : ""}>3 · 保存到 S3</li></ol>
+      <p className="s3-hint">USB 配网时保持主菜单或 WIFI 页面；USB DAP 会占用控制串口。配网完成后在设备上打开 W-DAP，再核验网络调试器。</p>
+    </section>
     <RadioPower radio="wifi" enabled={status?.enabled ?? false} supported={supported} connected={snapshot.connected} disabled={disabled} action={action} />
     <div className="s3-radio-grid">
       <section className="s3-card"><div className="s3-card-heading"><div><h2>附近的 Wi-Fi</h2><p>由 S3 扫描周围的 2.4 GHz 网络</p></div><button type="button" className="s3-btn" disabled={blocked} onClick={() => { void scan(); }}><Search size={16} />扫描网络</button></div>

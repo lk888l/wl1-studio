@@ -13,6 +13,7 @@ mod pn532;
 mod protocol;
 mod state;
 mod sticks3;
+mod sticks3_network;
 mod transport;
 mod types;
 
@@ -51,6 +52,7 @@ pub fn run() {
         .manage(gamebox::GameBoxState::default())
         .manage(nfc::NfcState::default())
         .manage(sticks3::StickS3State::default())
+        .manage(sticks3_network::StickS3NetworkState::default())
         .manage(commands::ProductSessionLifecycle::default())
         .manage(firmware::FirmwareState::default())
         .invoke_handler(tauri::generate_handler![
@@ -87,6 +89,8 @@ pub fn run() {
             commands::sticks3_disconnect,
             commands::sticks3_snapshot,
             commands::sticks3_request,
+            sticks3_network::sticks3_network_discover,
+            sticks3_network::sticks3_network_probe,
         ])
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")

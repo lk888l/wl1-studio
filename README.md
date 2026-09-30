@@ -33,20 +33,29 @@ WL1 现支持 **ZX-D30 单模 BLE 扫描连接与遥控**。选择蓝牙设备�
 
 ## StickS3 多功能工作台
 
-从产品库进入 **StickS3 多功能终端**，通过 USB 控制台在独立“无线连接”页扫描、选择和连接
-Wi-Fi / BLE 外设。支持手动填写 SSID、临时连接、连接成功后记住、每种无线 4 个记忆槽的切换
-与忘记，以及 BLE 主服务查看。连接与记忆状态以固件实际回报为准；密码不保存到电脑设置中。
+从产品库进入 **StickS3 多功能终端**，默认打开“SWD / JTAG → 调试工作区 · USB / Wi-Fi”。
+USB 和无线探针共用设备选择框、SWD/JTAG 协议选择及原有 Flash 界面。
+点击“添加无线设备”，输入 IPv4 或搜索局域网；核验身份后自动进入工作区并选中该设备。
+无线调试时设备需保持 W-DAP 开启，无需额外安装 OpenOCD。
 
-“SWD 调试器”页通过 USB CMSIS-DAP 提供芯片识别、完整 Flash 读取、十六进制 / ASCII
-浏览、地址跳转、BIN 备份、BIN / HEX / ELF / AXF 烧录、独立校验、整片主 Flash 擦除和复位。
-按实际器件 ID 与容量自动匹配 STM32F1 中容量、STM32F411、STM32G431，无需选择具体封装型号。
-读取、文件范围检查和擦除均使用实测容量；F103 报告 64 KiB 时可正常使用完整 64 KiB。
-已用 G431 完成桌面实机读取、擦除、空白检查和原程序恢复，并以 OpenOCD 独立回读确认一致。
+首次使用可在“USB 配网与蓝牙”页通过 USB 控制台扫描、选择和连接 Wi-Fi / BLE 外设。
+支持手动填写 SSID、临时连接、连接成功后记住、每种无线 4 个记忆槽的切换与忘记，
+以及 BLE 主服务查看。配网页显示取得 IP 与保存结果，并可将 IP 带入探针查找。
+连接与记忆状态以固件实际回报为准；密码不保存到电脑设置中。
 
-DAP 模式在 S3 屏幕选择；USB DAP 与配网控制串口互斥。Wi-Fi / BLE DAP 保留接线与工具
-说明，仍需单独运行 OpenOCD / BLE 桥接器。使用方式见 [StickS3 接入指南](docs/sticks3-integration.md)，
-测试范围与备份见 [SWD 验收记录](docs/sticks3-swd-validation.md)。
-自动识别改动的支持范围和待实机验证项见 [容量识别说明](docs/sticks3-swd-auto-detection.md)。
+共享工作区提供芯片识别、完整 Flash 读取、十六进制 / ASCII 浏览、地址跳转、BIN 备份、
+BIN / HEX / ELF / AXF 烧录、独立校验、整片主 Flash 擦除和复位。
+按实际器件 ID 与容量自动匹配 STM32F1 中容量、STM32F411、STM32G431；
+JTAG 还要求目标芯片支持该协议。读取、文件范围检查和擦除均使用实测容量。
+USB / SWD 已用 G431 完成实机读取、擦除、空白检查和原程序恢复，并以 OpenOCD 独立回读确认一致。
+Wi-Fi 已用 `172.18.7.163` 验证 SWD/JTAG 初始化和未接目标板时的识别失败与会话释放；
+无线目标读写仍待连接目标板验证。
+
+DAP 模式在 S3 屏幕选择；USB DAP 与配网控制串口互斥。每次无线操作重新核对探针序列号，
+操作完成释放连接，断线不自动重发写入。BLE DAP 仍使用独立的桥接器和 OpenOCD。
+使用方式见 [StickS3 接入指南](docs/sticks3-integration.md)，
+USB 测试范围与备份见 [SWD 验收记录](docs/sticks3-swd-validation.md)。
+自动识别支持范围见 [容量识别说明](docs/sticks3-swd-auto-detection.md)。
 
 ## 当前定位
 
