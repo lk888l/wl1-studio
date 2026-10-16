@@ -14,6 +14,8 @@ import {
   FileCode2,
   Keyboard,
   Music2,
+  PawPrint,
+  Paintbrush,
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
@@ -31,7 +33,7 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | null;
+  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
@@ -41,6 +43,7 @@ interface ProductHomeProps {
   onOpenGameBox: () => void;
   onOpenNfc: () => void;
   onOpenStickS3: () => void;
+  onOpenPet: () => void;
 }
 
 export function ProductHome({
@@ -57,6 +60,7 @@ export function ProductHome({
   onOpenGameBox,
   onOpenNfc,
   onOpenStickS3,
+  onOpenPet,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -130,10 +134,44 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>4 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
+            <span>5 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
           </div>
 
           <div className="product-catalog__layout">
+            <button
+              className={`product-card product-card--pet glass-card liquid-card is-${safetyState}${launching === "pet" ? " is-launching" : ""}`}
+              type="button"
+              disabled={safetyState !== "ready" || Boolean(launching)}
+              aria-describedby={safetyState === "error" ? "product-safety-error" : undefined}
+              onClick={onOpenPet}
+            >
+              <span className="product-card__visual" aria-hidden="true">
+                <span className="product-card__model">ESP32-C3 · PIXEL COMPANION</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true">
+                  <defs><linearGradient id="hubPetBody" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ede2f6" /><stop offset="1" stopColor="#c6afd9" /></linearGradient></defs>
+                  <ellipse cx="260" cy="260" rx="145" ry="15" fill="#806194" opacity=".1" />
+                  <g transform="rotate(-5 260 150)">
+                    <rect x="115" y="51" width="290" height="199" rx="35" fill="url(#hubPetBody)" stroke="#fff" strokeWidth="3" />
+                    <rect x="140" y="85" width="240" height="128" rx="14" fill="#26343d" />
+                    <rect x="149" y="94" width="222" height="110" rx="7" fill="#15242b" />
+                    <g fill="#d0f5df"><rect x="192" y="122" width="37" height="55" rx="17" /><rect x="292" y="122" width="37" height="55" rx="17" /></g>
+                    <g fill="#15242b"><rect x="200" y="128" width="9" height="10" rx="2" /><rect x="300" y="128" width="9" height="10" rx="2" /></g>
+                    <circle cx="374" cy="70" r="3" fill="#8ebda5" />
+                    <text x="141" y="73" fill="#a78abb" fontSize="8" fontFamily="monospace" letterSpacing="2">POCKET COMPANION</text>
+                    <text x="145" y="233" fill="#a68db9" fontSize="8" fontFamily="monospace">ESP32-C3</text>
+                    <g fill="#b29ac4"><circle cx="348" cy="229" r="3" /><circle cx="359" cy="229" r="3" /><circle cx="370" cy="229" r="3" /></g>
+                  </g>
+                  <path d="M95 72h10m-5-5v10M424 197h12m-6-6v12" stroke="#bea5d0" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <span className="product-card__body">
+                <span className="product-card__meta"><span className="product-available"><i />OLED 全屏桌宠 · USB 自定义</span></span>
+                <span className="product-card__title"><strong>ESP32-C3 像素桌宠</strong></span>
+                <span className="product-card__description">一双灵动的眼睛，一只团子猫，或亲手画的小动物。编辑动作帧、预览表情，把小伙伴带到 OLED 屏幕。</span>
+                <span className="product-card__features"><span><PawPrint size={15} />4 种小伙伴</span><span><Paintbrush size={15} />像素动画</span><span><Cable size={15} />USB 上传</span></span>
+                <span className="product-card__action"><strong>{launching === "pet" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入桌宠工作台"}</strong><ArrowRight size={21} /></span>
+              </span>
+            </button>
             <button
               className={`product-card product-card--sticks3 glass-card liquid-card is-${safetyState}${launching === "sticks3" ? " is-launching" : ""}`}
               type="button"

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager, State};
 
+use crate::deskpet::{PetSnapshot, PetState};
 use crate::gamebox::{GameBoxSnapshot, GameBoxState};
 use crate::mifare::CardDump;
 use crate::nfc::{NfcSnapshot, NfcState, ReadOptions, WriteOptions, WriteReport};
@@ -97,11 +98,13 @@ fn connect_device_blocking(
     let gamebox = app.state::<GameBoxState>();
     let nfc = app.state::<NfcState>();
     let sticks3 = app.state::<StickS3State>();
+    let pet = app.state::<PetState>();
     let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
     firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
+            pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
@@ -121,6 +124,7 @@ fn connect_device_blocking(
                 .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
+            pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
@@ -135,6 +139,7 @@ fn connect_device_blocking(
                 .as_deref()
                 .filter(|id| !id.is_empty())
                 .ok_or("请扫描并选择蓝牙设备")?;
+            pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
             nfc.disconnect(None)?;
@@ -183,6 +188,7 @@ pub fn gamebox_connect(
     // Preserve the existing robot safety shutdown when switching products.
     // Its writes target only its previously owned WL1 port, never GameBox.
     state.disconnect(None)?;
+    app.state::<PetState>().disconnect(None)?;
     app.state::<StickS3State>().disconnect(None)?;
     app.state::<NfcState>().disconnect(None)?;
     gamebox.connect(app, port_name)
@@ -226,6 +232,7 @@ pub fn nfc_connect(
     // device being abandoned.
     state.disconnect(None)?;
     gamebox.disconnect(None)?;
+    app.state::<PetState>().disconnect(None)?;
     app.state::<StickS3State>().disconnect(None)?;
     nfc.connect(app, port_name)
 }
@@ -242,6 +249,7 @@ pub async fn sticks3_connect(app: AppHandle, port_name: String) -> Result<StickS
         app.state::<AppState>().disconnect(None)?;
         app.state::<GameBoxState>().disconnect(None)?;
         app.state::<NfcState>().disconnect(None)?;
+        app.state::<PetState>().disconnect(None)?;
         app.state::<StickS3State>().connect(port_name)
     })
     .await
@@ -281,6 +289,63 @@ pub async fn sticks3_request(
     })
     .await
     .map_err(|error| format!("S3 请求任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn pet_connect(app: AppHandle, port_name: String) -> Result<PetSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<ProductSessionLifecycle>();
+        let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        app.state::<crate::firmware::FirmwareState>()
+            .ensure_idle()?;
+        let port_name = port_name.trim();
+        if port_name.is_empty() {
+            return Err("请选择桌宠串口".into());
+        }
+        ensure_serial_port_available(port_name)?;
+        app.state::<AppState>().disconnect(None)?;
+        app.state::<GameBoxState>().disconnect(None)?;
+        app.state::<NfcState>().disconnect(None)?;
+        app.state::<StickS3State>().disconnect(None)?;
+        app.state::<PetState>().connect(port_name)
+    })
+    .await
+    .map_err(|error| format!("桌宠连接任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn pet_disconnect(
+    app: AppHandle,
+    expected_session_id: Option<u64>,
+) -> Result<PetSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<ProductSessionLifecycle>();
+        let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        app.state::<PetState>().disconnect(expected_session_id)
+    })
+    .await
+    .map_err(|error| format!("桌宠断开任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn pet_snapshot(app: AppHandle) -> Result<PetSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<PetState>().snapshot())
+        .await
+        .map_err(|error| format!("桌宠状态任务中断：{error}"))?
+}
+
+#[tauri::command]
+pub async fn pet_command(
+    app: AppHandle,
+    expected_session_id: u64,
+    command: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<PetState>()
+            .command(expected_session_id, &command)
+    })
+    .await
+    .map_err(|error| format!("桌宠命令任务中断：{error}"))?
 }
 
 #[tauri::command]

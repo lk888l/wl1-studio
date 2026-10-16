@@ -387,6 +387,10 @@ pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
             .state::<crate::sticks3::StickS3State>()
             .snapshot()?
             .connected
+        || app
+            .state::<crate::deskpet::PetState>()
+            .snapshot()?
+            .connected
     {
         return Err("请先断开设备串口/演示/Mock 会话，再操作目标固件".into());
     }

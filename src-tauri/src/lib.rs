@@ -2,6 +2,7 @@
 
 mod bluetooth;
 mod commands;
+mod deskpet;
 mod firmware;
 mod firmware_image;
 mod firmware_target;
@@ -50,6 +51,7 @@ pub fn run() {
         .manage(state::AppState::default())
         .manage(bluetooth::BluetoothState::default())
         .manage(gamebox::GameBoxState::default())
+        .manage(deskpet::PetState::default())
         .manage(nfc::NfcState::default())
         .manage(sticks3::StickS3State::default())
         .manage(sticks3_network::StickS3NetworkState::default())
@@ -89,6 +91,10 @@ pub fn run() {
             commands::sticks3_disconnect,
             commands::sticks3_snapshot,
             commands::sticks3_request,
+            commands::pet_connect,
+            commands::pet_disconnect,
+            commands::pet_snapshot,
+            commands::pet_command,
             sticks3_network::sticks3_network_discover,
             sticks3_network::sticks3_network_probe,
         ])
@@ -118,6 +124,7 @@ pub fn run() {
                 let gamebox = app.state::<gamebox::GameBoxState>();
                 let nfc = app.state::<nfc::NfcState>();
                 let sticks3 = app.state::<sticks3::StickS3State>();
+                let pet = app.state::<deskpet::PetState>();
                 let lifecycle = app.state::<commands::ProductSessionLifecycle>();
                 let _lifecycle = lifecycle
                     .0
@@ -127,6 +134,7 @@ pub fn run() {
                 let _ = gamebox.disconnect(None);
                 let _ = nfc.disconnect(None);
                 let _ = sticks3.disconnect(None);
+                let _ = pet.disconnect(None);
             }
         });
 }

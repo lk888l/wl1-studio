@@ -21,6 +21,7 @@ import { OverviewPage } from "./components/pages/OverviewPage";
 import { RobotFeaturesPanel } from "./components/pages/RobotFeaturesPanel";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
+import { PetStudio } from "./components/pet/PetStudio";
 import { GameBoxStudio } from "./components/gamebox/GameBoxStudio";
 import { NfcStudio } from "./components/nfc/NfcStudio";
 import { StickS3Studio } from "./components/sticks3/StickS3Studio";
@@ -37,6 +38,7 @@ import { deviceGateway, motionCommand } from "./lib/device";
 import { gameboxGateway } from "./lib/gamebox";
 import { nfcGateway } from "./lib/nfc";
 import { sticks3Gateway } from "./lib/sticks3";
+import { petGateway } from "./lib/pet";
 import { BLUETOOTH_COMMAND_INTERVAL_MS, isBluetoothConnection, isRemoteConnection, REMOTE_COMMAND_INTERVAL_MS } from "./lib/connection";
 import { appendTelemetrySample, telemetryChannelFresh } from "./lib/telemetry";
 import { useRobotFeatures } from "./lib/use-robot-features";
@@ -137,7 +139,7 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
   return next;
 }
 
-type AppView = "products" | "wl1" | "piano" | "gamebox" | "nfc" | "sticks3";
+type AppView = "products" | "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet";
 type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
@@ -178,6 +180,7 @@ export default function App() {
       .then(() => gameboxGateway.initialize())
       .then(() => nfcGateway.initialize())
       .then(() => sticks3Gateway.initialize())
+      .then(() => petGateway.initialize())
       .then(() => {
         if (!cancelled) setCatalogSafety("ready");
       })
@@ -201,7 +204,8 @@ export default function App() {
           ? "GameBox Studio · 游戏机工作台"
           : view === "nfc"
             ? "NFC Studio · PN532 读卡器"
-            : view === "sticks3" ? "StickS3 Studio · 多功能设备工作台"
+            : view === "pet" ? "Pet Studio · ESP32-C3 桌宠工作台"
+              : view === "sticks3" ? "StickS3 Studio · 多功能设备工作台"
               : "KeyNest Studio · 口袋电子琴";
   }, [view]);
 
@@ -237,7 +241,7 @@ export default function App() {
 
   const launchLabel = launchTarget === "piano" ? "KeyNest Studio"
     : launchTarget === "gamebox" ? "GameBox Studio"
-      : launchTarget === "nfc" ? "NFC Studio" : launchTarget === "sticks3" ? "StickS3 Studio" : "WL1 Studio";
+      : launchTarget === "nfc" ? "NFC Studio" : launchTarget === "pet" ? "Pet Studio" : launchTarget === "sticks3" ? "StickS3 Studio" : "WL1 Studio";
 
   return (
     <div
@@ -261,9 +265,12 @@ export default function App() {
           onOpenGameBox={() => openProduct("gamebox")}
           onOpenNfc={() => openProduct("nfc")}
           onOpenStickS3={() => openProduct("sticks3")}
+          onOpenPet={() => openProduct("pet")}
         />
       ) : view === "wl1" ? (
         <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
+      ) : view === "pet" ? (
+        <PetStudio onBack={() => setView("products")} />
       ) : view === "gamebox" ? (
         <GameBoxStudio onBack={() => setView("products")} />
       ) : view === "nfc" ? (
