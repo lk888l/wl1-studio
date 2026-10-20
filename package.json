@@ -17,7 +17,7 @@
     "tauri": "tauri",
     "lint": "biome lint --diagnostic-level=error --max-diagnostics=100 src vite.config.ts",
     "check:frontend": "npm run lint && npm run typecheck && npm test && npm run build",
-    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --all-features --locked",
+    "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features --locked",
     "check": "npm run check:frontend && npm run check:rust",
     "bundle:linux": "bash scripts/package-linux.sh"
   },

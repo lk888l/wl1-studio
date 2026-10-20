@@ -1,0 +1,13 @@
+[package]
+name = "pc-monitor-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Lightweight system sampling and UDP telemetry independent of Tauri"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+nvml-wrapper = "0.13.0"
+mio = { version = "1", features = ["net", "os-poll"] }

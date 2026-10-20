@@ -3,6 +3,7 @@
 mod bluetooth;
 mod commands;
 mod deskpet;
+mod desktop;
 mod firmware;
 mod firmware_image;
 mod firmware_target;
@@ -10,6 +11,7 @@ mod firmware_usb;
 mod gamebox;
 mod mifare;
 mod nfc;
+mod pc_monitor;
 mod pn532;
 mod protocol;
 mod state;
@@ -47,17 +49,36 @@ fn refuse_linux_root_execution() {
 pub fn run() {
     #[cfg(target_os = "linux")]
     refuse_linux_root_execution();
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    if !desktop::is_ui_worker() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|arg| arg == "--show")
+                || !args.iter().any(|arg| arg == "--background")
+            {
+                desktop::request_show_main(app);
+            }
+        }));
+    }
+    builder
+        .manage(desktop::DesktopState::default())
         .manage(state::AppState::default())
         .manage(bluetooth::BluetoothState::default())
         .manage(gamebox::GameBoxState::default())
         .manage(deskpet::PetState::default())
+        .manage(pc_monitor::PcMonitorState::default())
         .manage(nfc::NfcState::default())
         .manage(sticks3::StickS3State::default())
         .manage(sticks3_network::StickS3NetworkState::default())
         .manage(commands::ProductSessionLifecycle::default())
         .manage(firmware::FirmwareState::default())
+        .setup(desktop::setup)
         .invoke_handler(tauri::generate_handler![
+            desktop::desktop_enter_background,
+            desktop::desktop_save_preferences,
+            pc_monitor::pc_monitor_start,
+            pc_monitor::pc_monitor_stop,
+            pc_monitor::pc_monitor_snapshot,
+            pc_monitor::pc_monitor_devices,
             firmware::firmware_status,
             firmware::firmware_list_probes,
             firmware::firmware_inspect,
@@ -101,6 +122,22 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                if code.is_none()
+                    && desktop::is_ui_worker()
+                    && !app.state::<desktop::DesktopState>().tray_available()
+                {
+                    api.prevent_exit();
+                    desktop::request_quit(app);
+                    return;
+                }
+                // The UI owns hardware jobs; wait for its accepted shutdown
+                // before the tray stops the sender and exits.
+                if desktop::defer_exit_to_ui(app) {
+                    api.prevent_exit();
+                    return;
+                }
+            }
             // A normal close must not abort a flash sector halfway through.
             // Force-killing the process or power loss cannot be prevented here.
             if app.state::<firmware::FirmwareState>().snapshot().busy {
@@ -116,25 +153,49 @@ pub fn run() {
                 }
                 return;
             }
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                if !desktop::confirm_quit(app, *code) {
+                    api.prevent_exit();
+                    return;
+                }
+            }
+            if app.state::<desktop::DesktopState>().tray_available() {
+                match &event {
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::CloseRequested { api, .. },
+                        ..
+                    } if label == "main" => {
+                        api.prevent_close();
+                        desktop::request_background(app);
+                        return;
+                    }
+                    // Destruction of the last WebView must keep the native
+                    // tray and sender alive. Explicit Quit uses Some(code).
+                    tauri::RunEvent::ExitRequested {
+                        code: None, api, ..
+                    } => {
+                        api.prevent_exit();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            #[cfg(target_os = "macos")]
+            if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                desktop::request_show_main(app);
+            }
             if matches!(
                 event,
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
-                let state = app.state::<state::AppState>();
-                let gamebox = app.state::<gamebox::GameBoxState>();
-                let nfc = app.state::<nfc::NfcState>();
-                let sticks3 = app.state::<sticks3::StickS3State>();
-                let pet = app.state::<deskpet::PetState>();
+                let _ = app.state::<pc_monitor::PcMonitorState>().0.stop(None);
                 let lifecycle = app.state::<commands::ProductSessionLifecycle>();
                 let _lifecycle = lifecycle
                     .0
                     .lock()
                     .unwrap_or_else(|error| error.into_inner());
-                let _ = state.disconnect(None);
-                let _ = gamebox.disconnect(None);
-                let _ = nfc.disconnect(None);
-                let _ = sticks3.disconnect(None);
-                let _ = pet.disconnect(None);
+                let _ = desktop::disconnect_products(app);
             }
         });
 }

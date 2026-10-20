@@ -15,7 +15,6 @@ import {
   Keyboard,
   Music2,
   PawPrint,
-  Paintbrush,
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
@@ -28,6 +27,7 @@ import { useState } from "react";
 
 import type { PersonalizationSettings } from "../types";
 import { PersonalizationPage } from "./pages/PersonalizationPage";
+import { BackgroundButton } from "./BackgroundButton";
 
 interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
@@ -85,6 +85,7 @@ export function ProductHome({
           </span>
         </div>
         <div className="product-hub__actions">
+          <BackgroundButton />
           <div className="product-hub__status" role="status" aria-label="产品库状态">
             <span className={`local-status is-${safetyState}`}><i />{safetyLabel}</span>
           </div>
@@ -146,7 +147,7 @@ export function ProductHome({
               onClick={onOpenPet}
             >
               <span className="product-card__visual" aria-hidden="true">
-                <span className="product-card__model">ESP32-C3 · PIXEL COMPANION</span>
+                <span className="product-card__model">ESP32-C3 · OLED WORKBENCH</span>
                 <svg viewBox="0 0 520 300" aria-hidden="true">
                   <defs><linearGradient id="hubPetBody" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ede2f6" /><stop offset="1" stopColor="#c6afd9" /></linearGradient></defs>
                   <ellipse cx="260" cy="260" rx="145" ry="15" fill="#806194" opacity=".1" />
@@ -165,11 +166,11 @@ export function ProductHome({
                 </svg>
               </span>
               <span className="product-card__body">
-                <span className="product-card__meta"><span className="product-available"><i />OLED 全屏桌宠 · USB 自定义</span></span>
-                <span className="product-card__title"><strong>ESP32-C3 像素桌宠</strong></span>
-                <span className="product-card__description">一双灵动的眼睛，一只团子猫，或亲手画的小动物。编辑动作帧、预览表情，把小伙伴带到 OLED 屏幕。</span>
-                <span className="product-card__features"><span><PawPrint size={15} />4 种小伙伴</span><span><Paintbrush size={15} />像素动画</span><span><Cable size={15} />USB 上传</span></span>
-                <span className="product-card__action"><strong>{launching === "pet" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入桌宠工作台"}</strong><ArrowRight size={21} /></span>
+                <span className="product-card__meta"><span className="product-available"><i />OLED 桌宠 · Wi-Fi 电脑监控</span></span>
+                <span className="product-card__title"><strong>ESP32-C3 桌宠与监控</strong></span>
+                <span className="product-card__description">编辑像素动作、预览表情，或通过 Wi-Fi 把电脑 CPU、内存与 GPU 状态实时显示到 OLED。</span>
+                <span className="product-card__features"><span><PawPrint size={15} />4 种小伙伴</span><span><Wifi size={15} />无线监控</span><span><Cable size={15} />USB 上传</span></span>
+                <span className="product-card__action"><strong>{launching === "pet" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入 ESP32-C3 工作台"}</strong><ArrowRight size={21} /></span>
               </span>
             </button>
             <button

@@ -339,6 +339,7 @@ pub async fn sticks3_network_discover(app: AppHandle) -> Result<Vec<NetworkDevic
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<crate::commands::ProductSessionLifecycle>();
         let lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        crate::desktop::ensure_foreground(&app)?;
         let state = app.state::<StickS3NetworkState>();
         let _guard = state.0.try_lock().map_err(|_| "已有网络查找正在进行")?;
         app.state::<crate::firmware::FirmwareState>()
@@ -360,6 +361,7 @@ pub async fn sticks3_network_probe(
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<crate::commands::ProductSessionLifecycle>();
         let lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        crate::desktop::ensure_foreground(&app)?;
         let state = app.state::<StickS3NetworkState>();
         let _guard = state.0.try_lock().map_err(|_| "已有网络查找正在进行")?;
         app.state::<crate::firmware::FirmwareState>()

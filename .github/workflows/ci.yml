@@ -57,9 +57,9 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Run Clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-features --locked
+        run: cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features --locked
 
   linux-package:
     name: Ubuntu package smoke test

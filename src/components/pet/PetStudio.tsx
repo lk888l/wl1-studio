@@ -2,7 +2,7 @@ import {
   ArrowLeft, Cable, Check, Copy, Download, Eraser, FileUp, Heart,
   ImagePlus, LoaderCircle, Moon, MousePointer2, Paintbrush, Pause,
   PawPrint, Play, Plus, RefreshCw, RotateCcw, Save, Smile, Sparkles,
-  Trash2, Unplug, Upload, X,
+  Trash2, Unplug, Upload, Wifi, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, PointerEvent } from "react";
@@ -15,6 +15,7 @@ import {
 } from "../../lib/pet-model";
 import type { PetAction, PetProject, PetStyle } from "../../lib/pet-model";
 import type { SerialPortOption } from "../../types";
+import { PcMonitorPanel } from "./PcMonitorPanel";
 import "./PetStudio.css";
 
 const errorText = (reason: unknown): string => reason instanceof Error ? reason.message : String(reason);
@@ -64,6 +65,7 @@ function imageToFrame(image: ImageBitmap, threshold: number, invert: boolean): s
 }
 
 export function PetStudio({ onBack }: { onBack: () => void }) {
+  const [tab, setTab] = useState<"pet" | "monitor">("pet");
   const [project, setProject] = useState<PetProject>(loadPetProject);
   const [style, setStyle] = useState<PetStyle>(4);
   const [action, setAction] = useState<PetAction>("idle");
@@ -263,6 +265,7 @@ export function PetStudio({ onBack }: { onBack: () => void }) {
     <aside className="pet-sidebar">
       <button type="button" className="pet-back" disabled={Boolean(busy)} onClick={back}><ArrowLeft size={16} />返回产品库</button>
       <div className="pet-brand"><span><PawPrint size={27} /></span><div><strong>Pet Studio</strong><small>ESP32-C3 · 像素陪伴</small></div></div>
+      {tab === "pet" ? <>
       <div className="pet-sidebar-heading">领养一个小伙伴 <Sparkles size={14} /></div>
       <div className="pet-presets">
         {presetThumbnails.map((preset) => <button type="button" key={preset.style} className={`pet-preset${style === preset.style ? " is-active" : ""}`} disabled={Boolean(busy)} onClick={() => choosePreset(preset.style)}>
@@ -272,12 +275,15 @@ export function PetStudio({ onBack }: { onBack: () => void }) {
         <button type="button" className={`pet-preset pet-preset--new${style === 4 ? " is-active" : ""}`} disabled={Boolean(busy)} onClick={() => { loadProject(newPetProject()); setNotice("空白宠物已创建，从待机动作开始绘制吧。"); }}><span className="pet-new-icon"><Plus size={23} /></span><span><strong>自己画一个</strong><small>64 × 32，任你想象</small></span></button>
       </div>
       <div className="pet-sidebar-note"><Heart size={21} /><strong>小屏幕，也有小情绪</strong><p>眨眼、吃东西、打瞌睡。每个动作都能亲手画出来。</p></div>
-      <div className={`pet-connection-state${snapshot.connected ? " is-online" : ""}`}><i /><span><strong>{snapshot.connected ? "ESP32-C3 已连接" : "本地创作模式"}</strong><small>{snapshot.portName ?? "可随时编辑、预览和导出"}</small></span></div>
+      </> : <div className="pet-monitor-sidebar"><Wifi size={30} /><h2>电脑状态，随时可见</h2><p>电脑采集系统指标，ESP32-C3 通过 Wi-Fi 接收。无需 USB 连接，切换页面后也会继续运行。</p></div>}
+      {tab === "pet" && <div className={`pet-connection-state${snapshot.connected ? " is-online" : ""}`}><i /><span><strong>{snapshot.connected ? "ESP32-C3 已连接" : "本地创作模式"}</strong><small>{snapshot.portName ?? "可随时编辑、预览和导出"}</small></span></div>}
     </aside>
 
     <main className="pet-workspace">
-      <header className="pet-topbar"><span>设备控制中心 <span>/</span> ESP32-C3 桌宠</span><span className="pet-save-state"><Save size={13} />{savePending ? "正在保存草稿…" : saved ? "草稿已自动保存" : "草稿未保存，请检查名称或导出备份"}</span></header>
-      <div className="pet-content">
+      <header className="pet-topbar"><span>设备控制中心 <span>/</span> ESP32-C3 工作台</span>{tab === "pet" && <span className="pet-save-state"><Save size={13} />{savePending ? "正在保存草稿…" : saved ? "草稿已自动保存" : "草稿未保存，请检查名称或导出备份"}</span>}</header>
+      <nav className="pet-workbench-tabs" aria-label="ESP32-C3 工作台功能"><button type="button" className={tab === "pet" ? "is-active" : ""} aria-pressed={tab === "pet"} disabled={Boolean(busy)} onClick={() => setTab("pet")}><PawPrint size={15} />桌宠</button><button type="button" className={tab === "monitor" ? "is-active" : ""} aria-pressed={tab === "monitor"} disabled={Boolean(busy)} onClick={() => setTab("monitor")}><Wifi size={15} />电脑监控</button></nav>
+      {tab === "monitor" && <PcMonitorPanel />}
+      <div className="pet-content" hidden={tab !== "pet"}>
         <div className="pet-heading"><div><span className="pet-eyebrow">A LITTLE COMPANY</span><h1>让像素，变成陪伴。</h1><p>挑一位小伙伴，给它画上表情，再带到你的 OLED 屏幕。</p></div><span className="pet-fullscreen-tag">128 × 64 OLED · 全屏桌宠</span></div>
         <section className="pet-connectbar" aria-label="ESP32-C3 设备连接">
           <Cable size={20} /><label htmlFor="pet-port">USB 设备</label>

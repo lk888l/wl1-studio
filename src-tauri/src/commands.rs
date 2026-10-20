@@ -101,6 +101,7 @@ fn connect_device_blocking(
     let pet = app.state::<PetState>();
     let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    crate::desktop::ensure_foreground(app)?;
     firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
@@ -179,6 +180,7 @@ pub fn gamebox_connect(
     port_name: String,
 ) -> Result<GameBoxSnapshot, String> {
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    crate::desktop::ensure_foreground(&app)?;
     firmware.ensure_idle()?;
     let port_name = port_name.trim();
     if port_name.is_empty() {
@@ -221,6 +223,7 @@ pub fn nfc_connect(
     port_name: String,
 ) -> Result<NfcSnapshot, String> {
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    crate::desktop::ensure_foreground(&app)?;
     firmware.ensure_idle()?;
     let port_name = port_name.trim();
     if port_name.is_empty() {
@@ -242,6 +245,7 @@ pub async fn sticks3_connect(app: AppHandle, port_name: String) -> Result<StickS
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<ProductSessionLifecycle>();
         let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        crate::desktop::ensure_foreground(&app)?;
         app.state::<crate::firmware::FirmwareState>()
             .ensure_idle()?;
         let port_name = port_name.trim();
@@ -296,6 +300,7 @@ pub async fn pet_connect(app: AppHandle, port_name: String) -> Result<PetSnapsho
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<ProductSessionLifecycle>();
         let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+        crate::desktop::ensure_foreground(&app)?;
         app.state::<crate::firmware::FirmwareState>()
             .ensure_idle()?;
         let port_name = port_name.trim();

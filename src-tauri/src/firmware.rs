@@ -377,6 +377,7 @@ fn check_confirmed_target(
 pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
     let lifecycle = app.state::<ProductSessionLifecycle>();
     let _lifecycle = lifecycle.0.lock().map_err(|_| "产品会话生命周期锁已损坏")?;
+    crate::desktop::ensure_foreground(app)?;
     app.state::<crate::sticks3_network::StickS3NetworkState>()
         .ensure_idle()?;
     if app.state::<crate::state::AppState>().snapshot()?.mode != "disconnected"

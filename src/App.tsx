@@ -22,6 +22,7 @@ import { RobotFeaturesPanel } from "./components/pages/RobotFeaturesPanel";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
 import { PetStudio } from "./components/pet/PetStudio";
+import { PcMonitorStatus } from "./components/pet/PcMonitorPanel";
 import { GameBoxStudio } from "./components/gamebox/GameBoxStudio";
 import { NfcStudio } from "./components/nfc/NfcStudio";
 import { StickS3Studio } from "./components/sticks3/StickS3Studio";
@@ -280,6 +281,8 @@ export default function App() {
       ) : (
         <PianoStudio onBack={() => setView("products")} />
       )}
+
+      <PcMonitorStatus />
 
       {productTransition !== "idle" && (
         <div
