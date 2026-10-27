@@ -1,4 +1,5 @@
 import { ArrowLeftRight, Download, FileJson, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { LiquidGlass } from "../LiquidGlass";
 import { useMemo, useRef, useState, type Dispatch } from "react";
 
 import { downloadCardDump, formatUid, parseCardDump, type CardDump } from "../../lib/nfc";
@@ -114,7 +115,7 @@ export function NfcComparePage({ dump, dumpSource, connected, busy, workspace, d
 
   return (
     <div className="nfc-stack">
-      <section className="nfc-card">
+      <LiquidGlass as="section" variant="panel" className="nfc-card">
         <div className="nfc-card__heading">
           <h2>加入对比数据</h2>
           <div className="nfc-actions">
@@ -155,9 +156,9 @@ export function NfcComparePage({ dump, dumpSource, connected, busy, workspace, d
         )}
         {error && <p className="nfc-warning-line is-error" role="alert">{error}</p>}
         {message && <p className="nfc-hint" role="status">{message}</p>}
-      </section>
+      </LiquidGlass>
 
-      <section className="nfc-card">
+      <LiquidGlass as="section" variant="panel" className="nfc-card">
         <div className="nfc-card__heading">
           <h2>待对比区 <span className="nfc-chip">{workspace.entries.length} 份记录</span></h2>
           <button className="nfc-button" type="button" disabled={!workspace.entries.length || importBusy}
@@ -187,13 +188,13 @@ export function NfcComparePage({ dump, dumpSource, connected, busy, workspace, d
             ))}
           </div>
         )}
-      </section>
+      </LiquidGlass>
 
       {(!a || !b) && workspace.entries.length > 0 && <section className="nfc-card"><p className="nfc-hint">{!a ? "请选择 A 基准记录。" : "A 已就绪。请再加入一份记录，或将已有记录设为 B。"}选择 A 和 B 后自动显示对比结果。</p></section>}
 
       {a && b && result && (
         <>
-          <section className="nfc-card">
+          <LiquidGlass as="section" variant="panel" className="nfc-card">
             <div className="nfc-card__heading">
               <h2>对比结果 <span className={`nfc-compare-status is-${result.status}`} role="status">
                 {result.status === "equal" ? "已记录内容一致" : result.status === "different" ? "发现差异" : "数据不全，无法确认一致"}
@@ -218,7 +219,7 @@ export function NfcComparePage({ dump, dumpSource, connected, busy, workspace, d
               </dl>
             )}
             <p className="nfc-hint">比较仅覆盖两份备份记录的范围，不代表门禁可用。未知内容不计为一致；同一块可以同时存在差异与未知内容。备份时间、耗时及诊断信息不参与内容比较。</p>
-          </section>
+          </LiquidGlass>
 
           {result.compatible && <section className="nfc-card">
             <div className="nfc-card__heading"><h2>逐{a.dump.unitSize === 16 ? "块" : "页"}对比</h2><span className="nfc-chip">显示 {visibleUnits.length} / {result.units.length}</span></div>

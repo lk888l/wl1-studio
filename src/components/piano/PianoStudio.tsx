@@ -39,6 +39,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { LiquidGlass } from "../LiquidGlass";
 
 type PianoPage = "overview" | "composer" | "keymap" | "library" | "firmware";
 
@@ -364,7 +365,7 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
     <div className="app-shell piano-shell">
       <div className="ambient ambient--one" /><div className="ambient ambient--two" /><div className="ambient ambient--three" />
 
-      <aside className="sidebar glass-panel piano-sidebar" aria-label="电子琴主导航">
+      <LiquidGlass as="aside" className="sidebar glass-panel piano-sidebar" aria-label="电子琴主导航">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true"><Music2 size={24} strokeWidth={2.2} /></div>
           <div><strong>KeyNest Studio</strong><span>口袋电子琴工作台</span></div>
@@ -391,10 +392,10 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
           </span>
           <Usb size={17} />
         </button>
-      </aside>
+      </LiquidGlass>
 
       <div className="workspace">
-        <header className="topbar glass-panel">
+        <LiquidGlass as="header" className="topbar glass-panel">
           <div className="topbar-context">
             <button className="icon-button topbar-home-button" type="button" aria-label="返回产品首页" title="返回产品首页" onClick={onBack}><ArrowLeft size={18} /></button>
             <div className="breadcrumbs"><span>口袋电子琴</span><ChevronRight size={14} /><strong>{currentMeta.label}</strong></div>
@@ -407,7 +408,7 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
               <span className="status-orb" /><div><small>{connected ? "DEMO CONNECTED" : "OFFLINE"}</small><strong>{connected ? port : "连接电子琴"}</strong></div><Cable size={17} />
             </button>
           </div>
-        </header>
+        </LiquidGlass>
 
         <main className="page-content">
           {page === "overview" && (
@@ -477,7 +478,7 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
         </main>
       </div>
 
-      {toast && <div className="toast-notice piano-toast" role="status"><CheckCircle2 size={17} />{toast}</div>}
+      {toast && <LiquidGlass as="div" className="toast-notice piano-toast" role="status"><CheckCircle2 size={17} />{toast}</LiquidGlass>}
       <PianoConnectionModal
         open={connectionOpen}
         connected={connected}
@@ -506,7 +507,7 @@ function PianoOverview({ connected, title, noteCount, slots, activeLane, onNavig
   const occupied = slots.filter((slot) => slot.title).length;
   return (
     <div className="page-stack piano-page">
-      <section className="piano-hero glass-card liquid-card">
+      <LiquidGlass as="section" variant="panel" className="piano-hero glass-card liquid-card">
         <div className="piano-hero__copy">
           <span className="section-kicker">POCKET KEYS · 51 MCU</span>
           <h1>把一段旋律，<em>装进掌心。</em></h1>
@@ -520,7 +521,7 @@ function PianoOverview({ connected, title, noteCount, slots, activeLane, onNavig
           <MiniPianoIllustration activeLane={activeLane} />
           <span className={`piano-device-status${connected ? " is-online" : ""}`}><i />{connected ? "演示设备在线" : "等待串口连接"}</span>
         </div>
-      </section>
+      </LiquidGlass>
 
       <section className="metric-grid piano-metrics" aria-label="电子琴项目概览">
         <article className="metric-card glass-card"><span className="metric-icon is-coral"><Music2 size={20} /></span><div><span>当前曲目</span><strong>{noteCount}<small> 音符</small></strong></div><em>{title}</em></article>
@@ -546,17 +547,17 @@ function PianoOverview({ connected, title, noteCount, slots, activeLane, onNavig
       </section>
 
       <section className="piano-overview-grid">
-        <article className="glass-card piano-project-card">
+        <LiquidGlass as="article" variant="panel" className="glass-card piano-project-card">
           <div className="section-title-row"><div><span className="section-kicker">CURRENT PROJECT</span><h2>{title}</h2></div><button className="small-action" type="button" onClick={() => onNavigate("composer")}>打开</button></div>
           <div className="piano-project-timeline">
             {Array.from({ length: 16 }, (_, index) => <i className={index < Math.min(16, Math.ceil(noteCount / 2)) ? "is-filled" : ""} key={index} />)}
           </div>
           <div className="piano-project-meta"><span><Music2 size={14} />{noteCount} 个音符</span><span><Gauge size={14} />108 BPM</span><span><Clock3 size={14} />约 18 秒</span></div>
-        </article>
-        <article className="glass-card piano-boundary-card">
+        </LiquidGlass>
+        <LiquidGlass as="article" variant="panel" className="glass-card piano-boundary-card">
           <span className="piano-boundary-card__icon"><CircuitBoard size={23} /></span>
           <div><span className="section-kicker">硬件边界</span><h2>先围绕低成本做对</h2><p>首版按 51 单片机、8 个按键、单个无源蜂鸣器建模。曲库容量和协议字段标记为“暂定”，待固件确定后再固化。</p></div>
-        </article>
+        </LiquidGlass>
       </section>
     </div>
   );
@@ -599,17 +600,17 @@ function ComposerPage({ title, bpm, tonicLabel, notes, bindings, duration, selec
         <div className="heading-actions"><span className={`composer-save-state${dirty ? " is-dirty" : ""}`}><i />{dirty ? "有未保存修改" : "已保存到本机"}</span><button className="secondary-button" type="button" onClick={onSave}><Save size={16} />保存</button><button className="primary-button" type="button" onClick={onOpenLibrary}><Upload size={16} />写入设备</button></div>
       </section>
 
-      <section className="composer-toolbar glass-card">
+      <LiquidGlass as="section" variant="panel" className="composer-toolbar glass-card">
         <label className="composer-title-input"><span>曲目名称</span><input value={title} maxLength={32} onChange={(event) => onTitleChange(event.target.value)} /></label>
         <label className="compact-field"><span>速度</span><div><input type="number" min={40} max={240} value={bpm} onChange={(event) => onBpmChange(Math.min(240, Math.max(40, Number(event.target.value) || 40)))} /><small>BPM</small></div></label>
         <div className="compact-field"><span>拍号</span><div className="compact-static">4 / 4</div></div>
         <div className="compact-field"><span>调式</span><div className="compact-static">{tonicLabel}</div></div>
         <div className="composer-toolbar__spacer" />
         <button className="icon-button icon-button--danger" type="button" aria-label="清空曲谱" title="清空曲谱" disabled={notes.length === 0} onClick={onClear}><Trash2 size={17} /></button>
-      </section>
+      </LiquidGlass>
 
       <section className="composer-layout">
-        <article className="glass-card score-card">
+        <LiquidGlass as="article" variant="panel" className="glass-card score-card">
           <header className="score-card__header">
             <div className="transport-controls">
               <button className="transport-play" type="button" aria-label={playing ? "暂停" : "播放"} onClick={onTogglePlay}>{playing ? <Pause size={19} fill="currentColor" /> : <Play size={19} fill="currentColor" />}</button>
@@ -643,9 +644,9 @@ function ComposerPage({ title, bpm, tonicLabel, notes, bindings, duration, selec
               <span className="piano-roll__playhead" style={{ "--playhead": playhead } as CSSProperties} />
             </div>
           </div>
-        </article>
+        </LiquidGlass>
 
-        <aside className="composer-inspector glass-card">
+        <LiquidGlass as="aside" variant="panel" className="composer-inspector glass-card">
           <div><span className="section-kicker">NOTE TOOL</span><h3>落笔长度</h3><p>选择后，再点击谱面或下方琴键。</p></div>
           <div className="duration-picker">
             {[{ value: 0.5, symbol: "♪", label: "八分" }, { value: 1, symbol: "♩", label: "四分" }, { value: 2, symbol: "𝅗𝅥", label: "二分" }].map((item) => (
@@ -658,10 +659,10 @@ function ComposerPage({ title, bpm, tonicLabel, notes, bindings, duration, selec
           </div>
           <div className="score-budget"><span><HardDrive size={15} />编码预估</span><strong>{estimate} B</strong><div><i style={{ width: `${Math.min(100, estimate / 5)}%` }} /></div><small>按“曲目头 + 每音符 3 B”暂估</small></div>
           <button className="secondary-button inspector-reset" type="button" onClick={() => onPlayheadChange(0)}><RotateCcw size={15} />回到开头</button>
-        </aside>
+        </LiquidGlass>
       </section>
 
-      <section className="virtual-keyboard-card glass-card">
+      <LiquidGlass as="section" variant="panel" className="virtual-keyboard-card glass-card">
         <header><div><span className="section-kicker">LIVE INPUT</span><h3>虚拟琴键</h3></div><span><Keyboard size={15} />点击试听并写入播放头位置</span></header>
         <div className="virtual-keyboard">
           {bindings.map((binding) => (
@@ -670,7 +671,7 @@ function ComposerPage({ title, bpm, tonicLabel, notes, bindings, duration, selec
             </button>
           ))}
         </div>
-      </section>
+      </LiquidGlass>
     </div>
   );
 }
@@ -699,16 +700,16 @@ function KeymapPage({ tonic, octave, bindings, connected, activeLane, onScaleCha
 
       <section className="keymap-layout">
         <div className="keymap-main">
-          <article className="glass-card scale-generator">
+          <LiquidGlass as="article" variant="panel" className="glass-card scale-generator">
             <div className="section-title-row"><div><span className="section-kicker">AUTO MAPPING</span><h2>一键生成大调音阶</h2><p>生成后仍可在下方覆盖任意一个按键。</p></div><span className="soft-badge">全音阶</span></div>
             <div className="scale-controls">
               <label><span>主音 / 大调</span><div className="select-shell"><select value={tonic} onChange={(event) => onScaleChange(Number(event.target.value))}>{tonicOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select><ChevronDown size={15} /></div></label>
               <label><span>起始八度</span><div className="octave-stepper"><button type="button" disabled={octave <= 3} onClick={() => onScaleChange(tonic, octave - 1)}>−</button><strong>{octave}</strong><button type="button" disabled={octave >= 5} onClick={() => onScaleChange(tonic, octave + 1)}>＋</button></div></label>
               <div className="scale-result"><span>生成结果</span><strong>{bindings.map((binding) => midiName(binding.midi)).join(" · ")}</strong></div>
             </div>
-          </article>
+          </LiquidGlass>
 
-          <article className="glass-card key-binding-card">
+          <LiquidGlass as="article" variant="panel" className="glass-card key-binding-card">
             <header><div><span className="section-kicker">PHYSICAL KEYS</span><h2>逐键映射</h2></div><span>8 路 GPIO 按键</span></header>
             <div className="binding-table">
               <div className="binding-table__head"><span>琴键</span><span>电脑键盘</span><span>音高</span><span>频率</span><span>试听</span></div>
@@ -722,15 +723,15 @@ function KeymapPage({ tonic, octave, bindings, connected, activeLane, onScaleCha
                 </div>
               ))}
             </div>
-          </article>
+          </LiquidGlass>
         </div>
 
-        <aside className="keymap-preview glass-card">
+        <LiquidGlass as="aside" variant="panel" className="keymap-preview glass-card">
           <span className="section-kicker">DEVICE PREVIEW</span><h2>按键预览</h2><p>点击下方琴键可直接试听方波音色。</p>
           <MiniPianoIllustration activeLane={activeLane} />
           <div className="keymap-mini-keys">{bindings.map((binding) => <button className={activeLane === binding.index ? "is-active" : ""} style={{ "--lane": binding.index } as CSSProperties} type="button" key={binding.index} onClick={() => onAudition(binding.index)}><span>K{binding.index + 1}</span><strong>{midiName(binding.midi)}</strong></button>)}</div>
           <div className="keymap-note"><Zap size={16} /><p><strong>蜂鸣器提示</strong>试听使用浏览器方波近似音色；最终音准取决于定时器频率和晶振误差。</p></div>
-        </aside>
+        </LiquidGlass>
       </section>
     </div>
   );
@@ -783,11 +784,11 @@ function DeviceLibraryPage({ title, noteCount, slots, connected, onSlotsChange, 
         <div className="heading-actions"><button className="secondary-button" type="button" onClick={onEdit}><Music2 size={16} />返回编辑</button><button className="primary-button" type="button" onClick={() => writeToSlot(slots.find((slot) => !slot.title)?.slot ?? 8)} disabled={Boolean(transfer)}><Upload size={16} />写入空闲槽位</button></div>
       </section>
 
-      <section className="library-summary glass-card">
+      <LiquidGlass as="section" variant="panel" className="library-summary glass-card">
         <div className="library-source"><span className="library-source__icon"><FileMusic size={22} /></span><div><span>准备写入</span><strong>{title}</strong><small>{noteCount} 个音符 · 预计 {estimate} B</small></div></div>
         <div className="library-capacity"><div><span>曲库预算（暂定）</span><strong>{formatBytes(usedBytes)} <small>/ {formatBytes(DEVICE_LIBRARY_BUDGET)}</small></strong></div><div className="capacity-track"><i style={{ width: `${Math.min(100, usedBytes / DEVICE_LIBRARY_BUDGET * 100)}%` }} /></div></div>
         <div className={`library-link${connected ? " is-online" : ""}`}><span className="status-orb" /><div><small>{connected ? "DEVICE READY" : "DEVICE OFFLINE"}</small><strong>{connected ? "Pocket Keys · 51" : "请先连接电子琴"}</strong></div></div>
-      </section>
+      </LiquidGlass>
 
       <section className="device-slots">
         {slots.map((slot) => {
@@ -803,10 +804,10 @@ function DeviceLibraryPage({ title, noteCount, slots, connected, onSlotsChange, 
         })}
       </section>
 
-      <section className="protocol-draft glass-card">
+      <LiquidGlass as="section" variant="panel" className="protocol-draft glass-card">
         <div><span className="protocol-draft__icon"><CircuitBoard size={22} /></span><div><span className="section-kicker">PROTOCOL DRAFT</span><h2>串口写曲草案</h2><p>上位机已为后端预留“握手 → 擦除槽位 → 分包写入 → 校验 → 更新目录”的状态。这里的帧结构只用于界面表达，不会向真实设备发命令。</p></div></div>
         <code><span>AA 55</span><span>CMD_WRITE_SONG</span><span>SLOT</span><span>LEN</span><span>DATA…</span><span>CRC8</span></code>
-      </section>
+      </LiquidGlass>
     </div>
   );
 }
@@ -883,32 +884,32 @@ function FirmwarePage({ connected, port, onNotice }: FirmwarePageProps) {
 
       <section className="firmware-layout">
         <div className="firmware-main">
-          <article className="glass-card firmware-step">
+          <LiquidGlass as="article" variant="panel" className="glass-card firmware-step">
             <header><span>01</span><div><h2>选择固件</h2><p>支持 Intel HEX 或原始 BIN 文件</p></div>{file && <CheckCircle2 size={20} />}</header>
             <label className={`firmware-dropzone${dragging ? " is-dragging" : ""}${file ? " has-file" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
               <input type="file" accept=".hex,.bin" onChange={onFileChange} />
               {file ? <><span className="firmware-file-icon"><FileCode2 size={25} /></span><div><strong>{file.name}</strong><small>{formatBytes(file.size)} · 文件已就绪</small></div><span className="file-replace">重新选择</span></> : <><span className="firmware-file-icon"><FileUp size={25} /></span><div><strong>拖入固件，或点击浏览</strong><small>.hex / .bin · 建议保留版本号</small></div></>}
             </label>
             {!file && <button className="firmware-demo-file" type="button" onClick={() => setFile({ name: "pocket-keys-v0.1.0.hex", size: 6144 })}>没有文件？使用演示固件</button>}
-          </article>
+          </LiquidGlass>
 
-          <article className="glass-card firmware-step">
+          <LiquidGlass as="article" variant="panel" className="glass-card firmware-step">
             <header><span>02</span><div><h2>目标与串口</h2><p>匹配芯片型号和 ISP 下载参数</p></div><Settings2 size={20} /></header>
             <div className="firmware-fields">
               <label><span>目标芯片</span><div className="select-shell"><select value={target} onChange={(event) => setTarget(event.target.value)}><option>STC89C52RC</option><option>STC89C51RC</option><option>AT89S52</option></select><ChevronDown size={15} /></div><small>首选低成本 8 位 51 方案</small></label>
               <label><span>演示通道</span><div className="select-shell"><select value={selectedPort} onChange={(event) => setSelectedPort(event.target.value)}>{PIANO_PREVIEW_CHANNELS.map((channel) => <option key={channel}>{channel}</option>)}</select><ChevronDown size={15} /></div><small>{connected && selectedPort === port ? "当前模拟通道" : "硬件端口未接入"}</small></label>
               <label><span>最高波特率</span><div className="select-shell"><select value={baud} onChange={(event) => setBaud(Number(event.target.value))}><option value={9600}>9,600</option><option value={57600}>57,600</option><option value={115200}>115,200</option></select><ChevronDown size={15} /></div><small>实际速率由 ISP 握手协商</small></label>
             </div>
-          </article>
+          </LiquidGlass>
 
-          <article className="glass-card firmware-step firmware-options-step">
+          <LiquidGlass as="article" variant="panel" className="glass-card firmware-step firmware-options-step">
             <header><span>03</span><div><h2>烧录选项</h2><p>开始前检查擦除、校验与上电方式</p></div><SlidersHorizontal size={20} /></header>
             <div className="firmware-options">
               <label><input type="checkbox" checked={eraseFlash} onChange={(event) => setEraseFlash(event.target.checked)} /><span><b>烧录前擦除代码区</b><small>避免旧固件残留</small></span></label>
               <label><input type="checkbox" checked={verify} onChange={(event) => setVerify(event.target.checked)} /><span><b>写入后校验</b><small>读取并核对内容</small></span></label>
               <label><input type="checkbox" checked={powerPrompt} onChange={(event) => setPowerPrompt(event.target.checked)} /><span><b>提示重新上电</b><small>适配 STC 冷启动下载</small></span></label>
             </div>
-          </article>
+          </LiquidGlass>
         </div>
 
         <aside className="firmware-console glass-card">
@@ -959,7 +960,7 @@ function PianoConnectionModal({ open, connected, port, baudRate, busy, onClose, 
 
   return (
     <div className="modal-backdrop piano-modal-backdrop">
-      <section className="connection-modal piano-connection-modal" role="dialog" aria-modal="true" aria-labelledby="piano-connection-title">
+      <LiquidGlass as="section" className="connection-modal piano-connection-modal" role="dialog" aria-modal="true" aria-labelledby="piano-connection-title">
         <header><div><span className="connection-modal__icon"><Usb size={21} /></span><div><span className="section-kicker">SERIAL LINK</span><h2 id="piano-connection-title">连接口袋电子琴</h2></div></div><button className="icon-button" type="button" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>
         {connected ? (
           <div className="piano-connected-panel">
@@ -979,7 +980,7 @@ function PianoConnectionModal({ open, connected, port, baudRate, busy, onClose, 
           </form>
         )}
         {connected && <div className="modal-actions piano-disconnect-actions"><button className="secondary-button" type="button" onClick={onClose}>完成</button><button className="danger-button" type="button" onClick={onDisconnect}>断开演示设备</button></div>}
-      </section>
+      </LiquidGlass>
     </div>
   );
 }

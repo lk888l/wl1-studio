@@ -2,6 +2,7 @@ import { Cpu, RadioTower, RotateCw, Save } from "lucide-react";
 
 import { isRemoteConnection } from "../../lib/connection";
 import type { ConnectionSnapshot } from "../../types";
+import { LiquidGlass } from "../LiquidGlass";
 
 interface AutoLegStatus {
   enabled: boolean;
@@ -43,7 +44,7 @@ export function RobotFeaturesPanel({
   const canWrite = connected && connection.writesUnlocked && busy === null && !disabled;
 
   return (
-    <section className="workbench-features glass-card" aria-label="小车设备信息与自适应腿高">
+    <LiquidGlass as="section" variant="panel" className="workbench-features glass-card" aria-label="小车设备信息与自适应腿高">
       <div className="workbench-features__heading">
         <div><span className="section-kicker">DEVICE FEATURES</span><h2>设备信息与自适应腿高</h2></div>
         <span className="soft-badge">{remote ? "遥控器单向链路" : "小车固件命令"}</span>
@@ -77,6 +78,6 @@ export function RobotFeaturesPanel({
         </div>
       </div>
       {notice && <div className="inline-notice" role="status">{notice}</div>}
-    </section>
+    </LiquidGlass>
   );
 }

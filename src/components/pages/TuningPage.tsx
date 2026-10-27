@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 
 import { formatParameterValue, parameterDefinitions, parameterGroups } from "../../data/parameters";
 import type { ParameterDefinition, ParameterProfile, ParameterValues } from "../../types";
+import { LiquidGlass } from "../LiquidGlass";
 import "./TuningPage.css";
 
 const bodyParameterIds = ["angleBias", "rollBias", "legHeight"];
@@ -132,23 +133,23 @@ export function TuningPage({ connected, remote = false, writesUnlocked, draft, a
 
       <div className="workbench-layout">
         <div className="workbench-settings">
-          <section className="workbench-group workbench-body glass-card" aria-label="机身重心与腿高">
+          <LiquidGlass as="section" variant="panel" className="workbench-group workbench-body glass-card" aria-label="机身重心与腿高">
             <div className="workbench-group__heading"><div><span className="section-kicker">BODY & BALANCE</span><h2>机身与重心</h2></div><div className="workbench-group__actions">{saveButton("机身与重心")}</div></div>
             <div className="workbench-body__parameters">
               {bodyParameterIds.map((id) => parameterDefinitions.find((item) => item.id === id)).filter((item): item is ParameterDefinition => Boolean(item)).map(row)}
             </div>
             <p className="workbench-footnote">角度中心是横滚零点偏置：原始横滚角 + 角度中心 = 补偿后横滚角。例如期望中点处原始角度为 +2.5°，则设置 −2.5°；下发后可随本组“保存到 Flash”一起保存。</p>
             {remote && <p className="workbench-footnote">共同腿高和角度中心仅可编辑本地草稿；请直连小车后下发。</p>}
-          </section>
+          </LiquidGlass>
           <div className="workbench-pid-grid">
             {pidGroups.map((group) => {
               const definitions = parameterDefinitions.filter((item) => item.group === group.id);
               const pending = definitions.filter((item) => pendingPid.includes(item.id)).map((item) => item.id);
               return (
-                <section className="workbench-group glass-card" key={group.id} aria-label={`${group.label} PID`}>
+                <LiquidGlass as="section" variant="panel" className="workbench-group glass-card" key={group.id} aria-label={`${group.label} PID`}>
                   <div className="workbench-group__heading"><div><h2>{group.label}</h2><p>{group.description}</p></div><div className="workbench-group__actions"><button className="text-button" type="button" disabled={!writesUnlocked || sending || pending.length === 0 || definitions.some((item) => invalidIds.includes(item.id))} onClick={() => onSendMany(pending)}>下发本组</button>{saveButton(group.label)}</div></div>
                   {definitions.map(row)}
-                </section>
+                </LiquidGlass>
               );
             })}
           </div>

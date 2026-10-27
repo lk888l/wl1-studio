@@ -13,6 +13,7 @@ import {
 import { useMemo, useState } from "react";
 
 import type { CalibrationDraft, TelemetrySample } from "../../types";
+import { LiquidGlass } from "../LiquidGlass";
 
 interface CalibrationPageProps {
   connected: boolean;
@@ -140,7 +141,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
         <span className="soft-badge">步骤 {step + 1} / {stepItems.length}</span>
       </section>
 
-      <section className="wizard-shell glass-card liquid-card">
+      <LiquidGlass as="section" variant="panel" className="wizard-shell glass-card liquid-card">
         <aside className="wizard-progress">
           {stepItems.map((item, index) => {
             const Icon = item.icon;
@@ -221,7 +222,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
             {step < stepItems.length - 1 && <button className="primary-button" type="button" disabled={busy} onClick={() => setStep((value) => value + 1)}>下一步<ArrowRight size={16} /></button>}
           </footer>
         </main>
-      </section>
+      </LiquidGlass>
     </div>
   );
 }

@@ -2,6 +2,8 @@
 
 本文说明 WL1 Studio（WL1 控制中心）的本地开发、测试和构建约定。Ubuntu 24.04 与 Windows 都是 CI 目标；所有文档和用户界面优先使用简体中文。Linux 系统准备和排障另见 [linux.md](linux.md)。
 
+Windows 界面材质的实现、接入方式与验证步骤见 [liquid-glass.md](liquid-glass.md)。
+
 ## 前置环境
 
 ### Node.js

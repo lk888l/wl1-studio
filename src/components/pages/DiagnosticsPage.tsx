@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { commandByteLength, isReadOnlyFirmwareCommand, validateFirmwareCommand } from "../../lib/protocol";
 import { isRemoteConnection } from "../../lib/connection";
 import type { ConnectionSnapshot, ConsoleDirection, ConsoleEntry } from "../../types";
+import { LiquidGlass } from "../LiquidGlass";
 
 type ConsoleFilter = "all" | ConsoleDirection;
 
@@ -153,25 +154,25 @@ export function DiagnosticsPage({
         </section>
 
         <aside className="diagnostics-sidebar">
-          <section className="glass-card diagnostic-control">
+          <LiquidGlass as="section" variant="panel" className="glass-card diagnostic-control">
             <div className="section-title-row"><div><span className="section-kicker">TELEMETRY</span><h2>遥测总开关</h2></div><RadioTower size={19} /></div>
             <p>{remote ? "遥控器无线桥接仅支持参数下发；查看 IMU 和 RPM 请切换为直连小车。" : "一起开启或停止姿态与轮速遥测。固件不返回 ACK，请以收到的实时数据为准。"}</p>
             <button className={!remote && telemetryEnabled ? "telemetry-toggle is-active" : "telemetry-toggle"} type="button" disabled={!connected || remote || busy} onClick={() => void toggleTelemetry()}>
               {!remote && telemetryEnabled ? <CircleStop size={19} /> : <RadioTower size={19} />}<span><strong>{remote ? "无线模式不支持遥测" : telemetryEnabled ? "停止遥测" : "开启遥测"}</strong><small>{remote ? "需要直连小车串口" : telemetryEnabled ? "本会话已请求开启（无 ACK）" : "本会话未请求开启 / 已请求停止（未确认）"}</small></span><i />
             </button>
-          </section>
+          </LiquidGlass>
 
-          <section className="glass-card quick-commands">
+          <LiquidGlass as="section" variant="panel" className="glass-card quick-commands">
             <div className="section-title-row"><div><span className="section-kicker">SHORTCUTS</span><h2>常用命令</h2></div></div>
             {quickCommands.filter((item) => !remote || !item.startsWith("legheight ")).map((item) => <button type="button" key={item} disabled={!connected || !writesUnlocked || busy} onClick={() => void send(item)}><code>{item}</code><Send size={14} /></button>)}
-          </section>
+          </LiquidGlass>
 
-          <section className="glass-card protocol-facts">
+          <LiquidGlass as="section" variant="panel" className="glass-card protocol-facts">
             <div><span>传输</span><strong>115200 · 8-N-1</strong></div><div><span>目标</span><strong>{remote ? "遥控器串口桥接" : "小车本体 / 仿真"}</strong></div><div><span>回执</span><strong>{remote ? "不回传小车回执" : "UID / autoleg 可查询"}</strong></div><div><span>{remote ? "命令上限" : "队列"}</span><strong>{remote ? "31 bytes + 换行" : "4 × 32 bytes"}</strong></div>
-          </section>
+          </LiquidGlass>
         </aside>
       </div>
-      {notice && <div className="toast-notice"><Check size={16} />{notice}</div>}
+      {notice && <LiquidGlass as="div" className="toast-notice"><Check size={16} />{notice}</LiquidGlass>}
     </div>
   );
 }

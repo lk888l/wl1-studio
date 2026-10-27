@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from "rea
 import { directionalMotion, HoldCommandRepeater, neutralMotion, type MotionDirection } from "../../lib/hold-control";
 import { motionCommand } from "../../lib/device";
 import type { MotionTarget, TelemetrySample } from "../../types";
+import { LiquidGlass } from "../LiquidGlass";
 import "./ControlPage.css";
 
 type Direction = MotionDirection;
@@ -300,7 +301,7 @@ export function ControlPage({
       </section>}
 
       <div className="control-layout">
-        <section className="control-deck glass-card liquid-card">
+        <LiquidGlass as="section" variant="panel" className="control-deck glass-card liquid-card">
           <div className="control-deck__head">
             <div>{!compact && <span className="section-kicker">MOTION PAD</span>}<h2>{compact ? "实时控制" : "按住移动"}</h2></div>
             <span className={"soft-badge" + (armed ? " is-danger" : "")}>{armed ? "已启用" : "未启用"}</span>
@@ -322,9 +323,9 @@ export function ControlPage({
           {compact && <button className="stop-button control-stop" type="button" disabled={!connected || !writesUnlocked || heightTarget === null} onClick={() => void emergencyStop()}><Octagon size={17} />立即停止</button>}
           <p className="control-release-hint">松开停止 · 空格 / Esc 停止并停用 · 切走窗口后需重新启用</p>
           {telemetryRequired && !telemetryHealthy && <div className="inline-error">姿态或轮速数据未就绪，控制已停用。数据恢复后请重新启用。</div>}
-        </section>
+        </LiquidGlass>
 
-        <section className="control-settings glass-card">
+        <LiquidGlass as="section" variant="panel" className="control-settings glass-card">
           {!compact && <div className="section-title-row"><div><span className="section-kicker">TARGETS</span><h2>运动目标</h2></div><SlidersHorizontal size={20} /></div>}
           <MotionTargetControl label="速度 / 转向幅度" value={speed} min={0.5} max={100} step={0.5} disabled={suspended} onChange={setSpeed} />
           <MotionTargetControl label="横滚目标" value={roll} min={-18} max={18} step={0.1} unit="°" disabled={suspended} onChange={setRoll} hint={compact ? undefined : "按住方向时生效，松开后回到 0°。"} />
@@ -334,7 +335,7 @@ export function ControlPage({
           {!compact && <><div className="command-preview"><span>下一帧预览</span><code>{preview}</code></div><div className="command-preview"><span>最近发送</span><code>{lastCommand || "尚未发送运动指令"}</code></div></>}
           {error && <div className="inline-error">{error}</div>}
           {compact && <div className="control-live-feedback"><span>轮速 <strong>{sample && rpmFresh ? ((Math.abs(sample.leftRpm) + Math.abs(sample.rightRpm)) / 2).toFixed(1) : "--"}</strong> rpm</span><span>俯仰 <strong>{sample && imuFresh ? sample.pitch.toFixed(1) : "--"}</strong>°</span></div>}
-        </section>
+        </LiquidGlass>
       </div>
 
       {!compact && <section className="safety-grid">

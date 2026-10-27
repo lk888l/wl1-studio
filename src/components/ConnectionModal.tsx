@@ -5,6 +5,7 @@ import type { BluetoothDeviceOption, ConnectionChoice, ConnectionSnapshot, Seria
 import { isTauriRuntime } from "../lib/device";
 import { isBluetoothConnection, isRemoteConnection } from "../lib/connection";
 import { loadConnectionPreferences, saveConnectionPreferences, selectAvailablePort } from "../lib/connection-preferences";
+import { LiquidGlass } from "./LiquidGlass";
 import "./ConnectionModal.css";
 
 interface ConnectionModalProps {
@@ -81,7 +82,7 @@ export function ConnectionModal({ connection, ports, bluetoothDevices, loading, 
   }
 
   return (
-    <section id="device-connection" className={`device-link glass-panel${connected ? " is-connected" : ""}`} aria-label="设备连接">
+    <LiquidGlass as="section" id="device-connection" className={`device-link glass-panel${connected ? " is-connected" : ""}`} aria-label="设备连接">
       <div className="device-link__main">
         <div className="device-link__identity">
           <span className="device-link__icon" aria-hidden="true">{connected ? <Check size={20} /> : bluetooth ? <Bluetooth size={20} /> : <Cable size={20} />}</span>
@@ -153,6 +154,6 @@ export function ConnectionModal({ connection, ports, bluetoothDevices, loading, 
           </>}
         </div>
       </details>
-    </section>
+    </LiquidGlass>
   );
 }

@@ -8,6 +8,7 @@ import {
   type FirmwareStatus, type ImageSummary, type ProbeConfig, type ProbeOption, type UsbSupport,
 } from "../../lib/firmware";
 import type { DapProtocol, NetworkProbe } from "../../lib/sticks3-network";
+import { LiquidGlass } from "../LiquidGlass";
 import "./FirmwarePage.css";
 
 interface FirmwarePageProps {
@@ -223,7 +224,7 @@ export function FirmwarePage({ product, connected, connectionBusy, onBusyChange,
       {!desktop && <p className="wl1-fw-notice">当前为浏览器预览。请打开桌面应用以使用真实 USB / Wi-Fi 烧录器。</p>}
       {(connected || connectionBusy) && <p className="wl1-fw-notice">请先在顶部断开串口或演示会话；目标调试独立于配网控制台。</p>}
 
-      <section className="glass-card wl1-fw-card">
+      <LiquidGlass as="section" variant="panel" className="glass-card wl1-fw-card">
         <header><Usb size={20} /><h2>烧录器与目标</h2><div className="wl1-fw-probe-actions">{product === "sticks3" && onFindNetwork && <button className="secondary-button" type="button" disabled={formLocked || scanning} onClick={onFindNetwork}><Wifi size={15} />添加无线设备</button>}<button className="secondary-button" type="button" disabled={!desktop || formLocked || scanning} onClick={() => void refreshProbes()}><RefreshCw size={15} className={scanning ? "spin" : undefined} />{scanning ? "正在搜索" : "刷新烧录器"}</button></div></header>
         <fieldset disabled={formLocked} className="wl1-fw-fields">
           <label className="wl1-fw-probe">{product === "sticks3" ? "StickS3 设备（USB / Wi-Fi）" : "ST-Link / CMSIS-DAP"}<select aria-label="烧录器设备" value={probeId} onChange={(event) => { setProbeId(event.target.value); const next = probes.find((p) => p.id === event.target.value); if (next?.protocols && !next.protocols.includes(protocol)) setProtocol(next.protocols[0] ?? "swd"); }}><option value="">{probes.length ? "请选择烧录器" : product === "sticks3" ? "请刷新 USB 或添加无线设备" : "未发现烧录器，请连接 USB 后刷新"}</option>{probes.map((probe, index) => <option key={`${probe.id}-${index}`} value={probe.id}>{probe.network ? probe.name : `USB · ${probe.name}`} · {probe.serialNumber || "无序列号"}{probe.accessible ? "" : "（需要 USB 权限）"}</option>)}</select></label>
@@ -239,10 +240,10 @@ export function FirmwarePage({ product, connected, connectionBusy, onBusyChange,
         <p className="wl1-fw-hint">{size === null ? "连接或读取后显示实际 Flash 容量与地址范围。" : `${hexAddress(FLASH_START)} — ${hexAddress(FLASH_START + size - 1)} · ${capacityLabel} 主 Flash。`}主 Flash 不包含系统 ROM、OTP 或选项字节。</p>
         {product === "gamebox" && <p className="wl1-fw-notice">固件仅写入前 62 KiB（至 0x0800F7FF），保留末尾 2 KiB 设置区；读取和导出的备份包含完整 64 KiB。</p>}
         {!selectedProbe?.network && <details className="wl1-fw-support"><summary>USB 驱动与权限设置</summary><p>{support?.description ?? (product === "sticks3" ? "Linux 需要 StickS3 USB 访问权限；Windows 使用 CMSIS-DAP / WinUSB。" : "Linux 需要烧录器 USB 访问权限；Windows 需要对应的 USB 驱动。")}</p>{support?.canInstall && <button className="secondary-button" type="button" disabled={blocked} onClick={() => setConfirm("setup")}>设置 USB 支持（系统授权）</button>}{support?.license && <details><summary>第三方驱动许可</summary><pre>{support.license}</pre></details>}</details>}
-      </section>
+      </LiquidGlass>
 
       <div className="wl1-fw-operations">
-        <section className="glass-card wl1-fw-card wl1-fw-flash">
+        <LiquidGlass as="section" variant="panel" className="glass-card wl1-fw-card wl1-fw-flash">
           <header><FileUp size={20} /><h2>烧录 / 更新固件</h2><span>01</span></header>
           <label className="wl1-fw-file"><FileUp size={26} /><strong>{firmware?.name ?? "选择已下载的固件"}</strong><span>BIN / Intel HEX / ELF / AXF · 最大 16 MiB</span><input type="file" accept=".bin,.hex,.elf,.axf" aria-label={`选择 ${target.backupPrefix} 烧录固件`} disabled={!desktop || formLocked} onChange={(event) => { void chooseFile(event.target.files?.[0]); event.target.value = ""; }} /></label>
           <label className="wl1-fw-address">BIN 起始地址<input value={baseAddress} spellCheck={false} disabled={formLocked || firmware?.format !== "bin"} onChange={(event) => setBaseAddress(event.target.value)} /><small>HEX / ELF 使用文件内地址；BIN 默认从 0x08000000 写入。</small></label>
@@ -253,30 +254,30 @@ export function FirmwarePage({ product, connected, connectionBusy, onBusyChange,
           {chip === "auto" && !detected && <p className="wl1-fw-hint">先连接并识别目标，或读取 Flash，即可按实际容量检查文件并启用烧录、擦除。</p>}
           <button className="primary-button" type="button" disabled={!canModify || !summary || !image || Boolean(imageError) || inspecting || choosingFile} onClick={() => setConfirm("flash")}><Zap size={17} />烧录固件</button>
           <button className="secondary-button wl1-fw-verify" type="button" disabled={!canOperate || !summary || !image || Boolean(imageError) || inspecting || choosingFile} onClick={() => void run("verify")}><ShieldCheck size={17} />仅校验文件与 Flash</button>
-        </section>
+        </LiquidGlass>
 
-        <section className="glass-card wl1-fw-card">
+        <LiquidGlass as="section" variant="panel" className="glass-card wl1-fw-card">
           <header><ArrowDownToLine size={20} /><h2>读取完整 Flash</h2><span>02</span></header>
           <p>{size === null ? "自动识别目标并读取完整主 Flash" : `读取全部 ${capacityLabel} 主 Flash`}，包括固件、参数和空白区域。支持十六进制查看和原始 BIN 备份。</p>
           <p className="wl1-fw-hint">不擦除、不写入 Flash。若芯片开启读保护，将报错并停止，不会自动解锁。</p>
           <button className="secondary-button" type="button" disabled={!canOperate} onClick={() => void run("read")}><ArrowDownToLine size={17} />读取全部 Flash</button>
-        </section>
+        </LiquidGlass>
 
-        {target.canErase && <section className="glass-card wl1-fw-card wl1-fw-erase">
+        {target.canErase && <LiquidGlass as="section" variant="panel" className="glass-card wl1-fw-card wl1-fw-erase">
           <header><Eraser size={20} /><h2>擦除全部 Flash</h2><span>03</span></header>
           <p>{size === null ? "识别容量后可清空全部主 Flash" : `清空全部 ${capacityLabel} 主 Flash`}，包含现有程序、bootloader 和存放其中的参数。</p>
           <p className="wl1-fw-hint">建议先读取并导出备份。擦除后逐字节检查是否全部为 FF；不会写入新固件。</p>
           <button className="danger-button" type="button" disabled={!canModify} onClick={() => { setEraseText(""); setConfirm("erase"); }}><Eraser size={17} />擦除全部 Flash</button>
-        </section>}
+        </LiquidGlass>}
       </div>
 
-      <section className="glass-card wl1-fw-card wl1-fw-progress" aria-live="polite">
+      <LiquidGlass as="section" variant="panel" className="glass-card wl1-fw-card wl1-fw-progress" aria-live="polite">
         <header>{busy ? <LoaderCircle className="spin" size={20} /> : <ShieldCheck size={20} />}<h2>{busy ? "操作进行中" : "操作状态"}</h2><span>{progress !== undefined ? `${progress}%` : busy ? "处理中" : ""}</span></header>
         <p role={error ? "alert" : undefined} className={error ? "wl1-fw-error" : undefined}>{error ?? notice ?? (status.message || emptyStatus.message)}</p>
         {(busy || status.stage === "complete") && <progress aria-label={status.message} max={100} value={progress} />}
         {busy && <small>请等待当前操作完成。此时无法切换页面、连接串口或正常关闭窗口。</small>}
         {report && <div className="wl1-fw-chip"><span>{report.chip.name} · 实测 {kib(report.chip.flashSize)} · {report.chip.speedKhz} kHz</span><code>UID {report.chip.uid} · ID {hexAddress(report.chip.deviceId)}</code></div>}
-      </section>
+      </LiquidGlass>
 
       <section className="glass-card wl1-fw-card wl1-fw-viewer">
         <header><Cpu size={20} /><h2>Flash 数据</h2><button className="secondary-button" type="button" disabled={!dump} onClick={() => { if (dump) downloadFlash(dump.data, `${dump.backupPrefix}-${dump.report.chip.uid}-${dump.readAt.replace(/[:.]/g, "-")}.bin`); }}><ArrowDownToLine size={16} />导出 BIN 备份</button></header>
@@ -289,13 +290,13 @@ export function FirmwarePage({ product, connected, connectionBusy, onBusyChange,
         </>}
       </section>
 
-      <dialog className="wl1-fw-dialog" ref={dialog} onCancel={() => setConfirm(null)}>
+      <LiquidGlass as="dialog" className="wl1-fw-dialog" ref={dialog} onCancel={() => setConfirm(null)}>
         <h2>{confirm === "erase" ? "确认擦除整片主 Flash" : confirm === "setup" ? "设置 USB 支持" : "确认烧录固件"}</h2>
         {confirm === "setup" ? <><p>{support?.description}</p><p>点击继续后系统才会请求管理员授权，可以在系统授权窗口取消。不会烧录、擦除或读取芯片。{product === "sticks3" ? "完成后请刷新烧录器。" : "完成后请重新插拔烧录器。"}</p>{support?.platform === "windows" && <p>继续设置表示接受“USB 驱动与权限设置”中展示的 ST 第三方驱动许可。</p>}</> : <><p>目标：{target.label} · {capacityLabel}</p><code>{selectedProbe?.name} · {selectedProbe?.serialNumber ?? probeId}</code>{detected && <code>UID {detected.uid}</code>}<p>{product === "sticks3" ? "请确认目标芯片、供电与所选 SWD/JTAG 接线，并保存需要保留的 Flash 备份。" : product === "wl1" ? "请确认电机电源已断开，主控供电与 SWD 接线稳定。" : "请确认游戏机供电与 SWD 接线稳定；末尾 2 KiB 设置区将保留。"}</p></>}
         {confirm === "flash" && <><strong>{firmware?.name}</strong><code>SHA-256 {summary?.sha256}</code><div className="wl1-fw-confirm-ranges">{summary?.regions.map((region) => <code key={region.address}>{hexAddress(region.address)} — {hexAddress(region.address + region.length - 1)}</code>)}</div><p>将写入 {kib(summary?.programmedSize ?? 0)} 数据，覆盖范围之外的数据保留。校验完成后自动复位启动。</p></>}
         {confirm === "erase" && <><p className="wl1-fw-error">固件、bootloader 和 Flash 中的参数将全部丢失，此操作无法撤销。</p><label>输入 ERASE 确认<input value={eraseText} autoComplete="off" spellCheck={false} onChange={(event) => setEraseText(event.target.value)} /></label></>}
         <footer><button className="secondary-button" type="button" onClick={() => setConfirm(null)}>取消</button><button className={confirm === "erase" ? "danger-button" : "primary-button"} type="button" disabled={blocked || (confirm === "erase" && eraseText !== "ERASE")} onClick={() => { if (confirm) void run(confirm); }}>{confirm === "erase" ? "确认擦除" : confirm === "setup" ? "继续设置" : "确认烧录"}</button></footer>
-      </dialog>
+      </LiquidGlass>
     </div>
   );
 }

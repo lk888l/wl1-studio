@@ -41,6 +41,7 @@ import {
 } from "../../lib/nfc";
 import { comparisonReducer, emptyComparisonWorkspace } from "../../lib/nfc-comparison";
 import { NfcComparePage } from "./NfcComparePage";
+import { LiquidGlass } from "../LiquidGlass";
 import type { SerialPortOption } from "../../types";
 import "./NfcStudio.css";
 
@@ -311,7 +312,7 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="nfc-studio">
-      <aside className="nfc-sidebar">
+      <LiquidGlass as="aside" className="nfc-sidebar">
         <button className="nfc-back" type="button" onClick={returnToHub}>
           <ArrowLeft size={14} />返回产品库
         </button>
@@ -357,10 +358,10 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
             <span>{connected ? snapshot.label : "选择串口后点击连接"}</span>
           </div>
         </div>
-      </aside>
+      </LiquidGlass>
 
       <div className="nfc-workspace">
-        <header className="nfc-topbar">
+        <LiquidGlass as="header" className="nfc-topbar">
           <div className="nfc-breadcrumb">
             <span>NFC 工作台</span>
             <strong>{currentPage.label}</strong>
@@ -368,7 +369,7 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
           <div className="nfc-topbar__firmware">
             {snapshot.firmware && <span>{snapshot.firmware}</span>}
           </div>
-        </header>
+        </LiquidGlass>
 
         <main className="nfc-content">
           <section className="nfc-page-heading">
@@ -383,7 +384,7 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
             </span>
           </section>
 
-          <section className="nfc-connection">
+          <LiquidGlass as="section" className="nfc-connection">
             <div className="nfc-port-field">
               <label htmlFor="nfc-port">读卡器串口</label>
               <select
@@ -437,7 +438,7 @@ export function NfcStudio({ onBack }: { onBack: () => void }) {
                 {busy ? "连接中…" : "连接读卡器"}
               </button>
             )}
-          </section>
+          </LiquidGlass>
 
           {!isTauriRuntime() && (
             <div className="nfc-banner is-warning" role="alert">
@@ -555,7 +556,7 @@ function ReadPage({
 }) {
   return (
     <div className="nfc-stack">
-      <section className="nfc-card">
+      <LiquidGlass as="section" variant="panel" className="nfc-card">
         <div className="nfc-card__heading">
           <h2>读取整张卡</h2>
           <button
@@ -584,10 +585,10 @@ function ReadPage({
           />
           <span className="nfc-field__note">多个密钥用空格或逗号分隔，会优先于内置字典尝试。</span>
         </div>
-      </section>
+      </LiquidGlass>
 
       {dump && (
-        <section className="nfc-card">
+        <LiquidGlass as="section" variant="panel" className="nfc-card">
           <div className="nfc-card__heading">
             <h2>卡片摘要</h2>
             <span className="nfc-chip">{timeLabel(dump.readAt)}</span>
@@ -624,11 +625,11 @@ function ReadPage({
               {warning}
             </p>
           ))}
-        </section>
+        </LiquidGlass>
       )}
 
       {unresolved.length > 0 && (
-        <section className="nfc-card">
+        <LiquidGlass as="section" variant="panel" className="nfc-card">
           <div className="nfc-card__heading">
             <h2>
               <KeyRound size={16} /> 待补齐数据或密钥的扇区
@@ -659,7 +660,7 @@ function ReadPage({
           >
             <RefreshCw size={15} />使用新密钥重试读取
           </button>
-        </section>
+        </LiquidGlass>
       )}
     </div>
   );
@@ -1050,7 +1051,7 @@ function DataPage({ dump, onCopy, onCompare }: { dump: CardDump | null; onCopy: 
 function HelpPage() {
   return (
     <div className="nfc-stack">
-      <section className="nfc-card">
+      <LiquidGlass as="section" variant="panel" className="nfc-card">
         <h2>接线与跳线</h2>
         <ol className="nfc-steps">
           <li>
@@ -1069,9 +1070,9 @@ function HelpPage() {
             <strong>串口参数</strong>：115200、8 数据位、无校验、1 停止位、无流控。
           </li>
         </ol>
-      </section>
+      </LiquidGlass>
 
-      <section className="nfc-card">
+      <LiquidGlass as="section" variant="panel" className="nfc-card">
         <h2>常见问题</h2>
         <dl className="nfc-faq">
           <div>
@@ -1115,7 +1116,7 @@ function HelpPage() {
             </dd>
           </div>
         </dl>
-      </section>
+      </LiquidGlass>
 
       <section className="nfc-card">
         <h2>使用范围</h2>

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./styles.css";
 import "./components/piano/PianoStudio.css";
+import "./components/LiquidGlass.css";
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

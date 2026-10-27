@@ -23,6 +23,7 @@ import {
   trajectoryPolyline,
 } from "../../lib/leg-kinematics";
 import type { LegGeometry, Point2D } from "../../lib/leg-kinematics";
+import { LiquidGlass } from "../LiquidGlass";
 
 const geometryFields: Array<{
   key: keyof LegGeometry;
@@ -214,7 +215,7 @@ export function KinematicsPage() {
       </section>
 
       <div className="kinematics-layout">
-        <section className="glass-card liquid-card kinematics-stage-card">
+        <LiquidGlass as="section" variant="panel" className="glass-card liquid-card kinematics-stage-card">
           <div className="kinematics-card-head">
             <div><span className="section-kicker">MECHANISM VIEW</span><h2>单腿机构</h2></div>
             <div className="kinematics-legend">
@@ -310,10 +311,10 @@ export function KinematicsPage() {
               {showTrace ? <EyeOff size={15} /> : <Eye size={15} />}{showTrace ? "隐藏轨迹" : "显示轨迹"}
             </button>
           </div>
-        </section>
+        </LiquidGlass>
 
         <aside className="kinematics-sidebar">
-          <section className="glass-card kinematics-geometry-card">
+          <LiquidGlass as="section" variant="panel" className="glass-card kinematics-geometry-card">
             <div className="kinematics-card-head">
               <div><span className="section-kicker">GEOMETRY</span><h2>机构参数</h2></div>
               <span className="kinematics-head-icon"><Settings2 size={18} /></span>
@@ -327,9 +328,9 @@ export function KinematicsPage() {
                 </label>
               ))}
             </div>
-          </section>
+          </LiquidGlass>
 
-          <section className="glass-card kinematics-inspector">
+          <LiquidGlass as="section" variant="panel" className="glass-card kinematics-inspector">
             <div className="kinematics-card-head">
               <div><span className="section-kicker">INSPECTOR</span><h2>实时解算</h2></div>
               <span className="kinematics-head-icon"><Ruler size={18} /></span>
@@ -347,7 +348,7 @@ export function KinematicsPage() {
             ) : (
               <div className="kinematics-warning"><AlertTriangle size={19} /><div><strong>机构在当前角度不可达</strong><span>两圆无交点，B 点不存在。播放仍会继续扫描可行区间。</span></div></div>
             )}
-          </section>
+          </LiquidGlass>
 
           <div className="kinematics-source-note">
             <span>固件同步</span>

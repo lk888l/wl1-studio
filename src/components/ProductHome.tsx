@@ -28,6 +28,7 @@ import { useState } from "react";
 import type { PersonalizationSettings } from "../types";
 import { PersonalizationPage } from "./pages/PersonalizationPage";
 import { BackgroundButton } from "./BackgroundButton";
+import { LiquidGlass } from "./LiquidGlass";
 
 interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
@@ -75,7 +76,7 @@ export function ProductHome({
       <div className="ambient ambient--two" />
       <div className="ambient ambient--three" />
 
-      <header className="product-hub__topbar glass-panel">
+      <LiquidGlass as="header" className="product-hub__topbar glass-panel">
         <div className="product-hub__brand">
           <span className="product-hub__brand-mark" aria-hidden="true">
             <Boxes size={24} strokeWidth={2.1} />
@@ -100,7 +101,7 @@ export function ProductHome({
             {showPersonalization ? "返回产品库" : "个性设置"}
           </button>
         </div>
-      </header>
+      </LiquidGlass>
 
       <main className="product-home" id="product-home-content">
         {showPersonalization ? (
@@ -139,7 +140,7 @@ export function ProductHome({
           </div>
 
           <div className="product-catalog__layout">
-            <button
+            <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--pet glass-card liquid-card is-${safetyState}${launching === "pet" ? " is-launching" : ""}`}
               type="button"
               disabled={safetyState !== "ready" || Boolean(launching)}
@@ -172,8 +173,8 @@ export function ProductHome({
                 <span className="product-card__features"><span><PawPrint size={15} />4 种小伙伴</span><span><Wifi size={15} />无线监控</span><span><Cable size={15} />USB 上传</span></span>
                 <span className="product-card__action"><strong>{launching === "pet" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入 ESP32-C3 工作台"}</strong><ArrowRight size={21} /></span>
               </span>
-            </button>
-            <button
+            </LiquidGlass>
+            <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--sticks3 glass-card liquid-card is-${safetyState}${launching === "sticks3" ? " is-launching" : ""}`}
               type="button"
               disabled={safetyState !== "ready" || Boolean(launching)}
@@ -204,8 +205,8 @@ export function ProductHome({
                 <span className="product-card__features"><span><Wifi size={15} />Wi-Fi 配网</span><span><Bluetooth size={15} />蓝牙连接</span><span><Cpu size={15} />SWD / JTAG</span></span>
                 <span className="product-card__action"><strong>{launching === "sticks3" ? "正在打开工作台…" : safetyState === "checking" ? "正在准备设备会话…" : safetyState === "error" ? "等待安全检查通过" : "进入 StickS3 工作台"}</strong><ArrowRight size={21} /></span>
               </span>
-            </button>
-            <button
+            </LiquidGlass>
+            <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--gamebox glass-card liquid-card is-${safetyState}${launching === "gamebox" ? " is-launching" : ""}`}
               type="button"
               disabled={safetyState !== "ready" || Boolean(launching)}
@@ -253,8 +254,8 @@ export function ProductHome({
                   <ArrowRight size={21} />
                 </span>
               </span>
-            </button>
-            <button
+            </LiquidGlass>
+            <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--nfc glass-card liquid-card is-${safetyState}${launching === "nfc" ? " is-launching" : ""}`}
               type="button"
               disabled={safetyState !== "ready" || Boolean(launching)}
@@ -351,8 +352,8 @@ export function ProductHome({
                   {safetyState === "ready" ? <ArrowRight size={21} /> : <ShieldCheck size={20} />}
                 </span>
               </span>
-            </button>
-            <button
+            </LiquidGlass>
+            <LiquidGlass as="button" variant="panel"
               className={`product-card glass-card liquid-card is-${safetyState}${launching === "wl1" ? " is-launching" : ""}`}
               type="button"
               disabled={safetyState !== "ready" || Boolean(launching)}
@@ -428,9 +429,9 @@ export function ProductHome({
                   {safetyState === "ready" ? <ArrowRight size={21} /> : <ShieldCheck size={20} />}
                 </span>
               </span>
-            </button>
+            </LiquidGlass>
 
-            <button
+            <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--piano glass-card liquid-card is-${safetyState}${launching === "piano" ? " is-launching" : ""}`}
               type="button"
               disabled={!pianoPreviewEnabled || safetyState !== "ready" || Boolean(launching)}
@@ -508,7 +509,7 @@ export function ProductHome({
                   {pianoPreviewEnabled && safetyState === "ready" ? <ArrowRight size={21} /> : <Cpu size={20} />}
                 </span>
               </span>
-            </button>
+            </LiquidGlass>
           </div>
         </section>
         </>}

@@ -1,0 +1,75 @@
+/* The native window stays opaque. These filters only sample the app's DOM. */
+.liquid-glass-defs { position: fixed; overflow: hidden; pointer-events: none; }
+
+.liquid-glass[data-liquid-glass="refractive"] {
+  --liquid-tint: rgba(255, 255, 255, .32);
+  --liquid-light-x: 22%;
+  --liquid-light-y: 0%;
+  border: 1px solid rgba(255, 255, 255, .8);
+  background:
+    radial-gradient(ellipse at var(--liquid-light-x) var(--liquid-light-y), rgba(255,255,255,.48), transparent 68%),
+    linear-gradient(145deg, rgba(255,255,255,.2), transparent 44%, rgba(169,197,236,.09)),
+    var(--liquid-tint);
+  box-shadow:
+    inset 0 1px 1px rgba(255,255,255,.95),
+    inset 1px 0 1px rgba(255,255,255,.48),
+    inset 0 -1px 1px rgba(95,121,162,.16),
+    0 10px 32px rgba(45,65,101,.1),
+    0 2px 6px rgba(45,65,101,.05);
+  -webkit-backdrop-filter: var(--liquid-filter) saturate(135%);
+  backdrop-filter: var(--liquid-filter) saturate(135%);
+}
+
+.liquid-glass[data-liquid-glass="refractive"][data-liquid-strength="soft"] { --liquid-tint: rgba(255,255,255,.56); }
+.liquid-glass[data-liquid-glass="refractive"][data-liquid-strength="clear"] { --liquid-tint: rgba(255,255,255,.18); }
+
+/* Broad content coverage uses a quieter material; live overlays keep their depth. */
+.liquid-glass[data-liquid-glass="refractive"][data-liquid-variant="panel"] {
+  --liquid-tint: rgba(255,255,255,.46);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.92), inset 0 -1px 1px rgba(95,121,162,.12), 0 8px 28px rgba(45,65,101,.075);
+}
+.liquid-glass[data-liquid-glass="refractive"][data-liquid-variant="panel"][data-liquid-strength="soft"] { --liquid-tint: rgba(255,255,255,.65); }
+.liquid-glass[data-liquid-glass="refractive"][data-liquid-variant="panel"][data-liquid-strength="clear"] { --liquid-tint: rgba(255,255,255,.3); }
+.product-card[data-liquid-glass="refractive"]:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 32%, white); box-shadow: var(--shadow), inset 0 1px 1px white; }
+
+/* Elevate bars over scrolling workspace content so their live backdrop is visible. */
+.product-hub:has(> [data-liquid-supported="true"]),
+.app-shell:has(.topbar[data-liquid-supported="true"]) { overflow: clip; }
+.product-hub__topbar[data-liquid-supported="true"] { position: sticky; top: 18px; }
+:is(.gb-topbar, .nfc-topbar, .s3-topbar, .pet-topbar)[data-liquid-supported="true"] {
+  position: sticky;
+  top: 14px;
+  z-index: 4;
+  border-radius: 18px;
+}
+:is(.gb-sidebar, .nfc-sidebar, .s3-sidebar, .pet-sidebar)[data-liquid-supported="true"] { z-index: 5; }
+
+/* A parent backdrop filter would prevent the dialog from sampling the app. */
+.modal-backdrop:has(> [data-liquid-glass="refractive"]) {
+  background: rgba(30,46,73,.18);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.liquid-glass:is(.connection-modal, .wl1-fw-dialog)[data-liquid-glass="refractive"] {
+  --liquid-tint: rgba(250,252,255,.58);
+  box-shadow: 0 32px 90px rgba(32,52,87,.24), inset 0 1px 1px white, inset 0 -1px 1px rgba(95,121,162,.18);
+}
+.wl1-fw-dialog[data-liquid-glass="refractive"]::backdrop { background: rgba(20,35,60,.26); backdrop-filter: none; }
+
+.liquid-glass[data-liquid-glass="opaque"] {
+  background: #f7faff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+@media (forced-colors: active) {
+  .liquid-glass[data-liquid-glass="opaque"] { color: CanvasText; background: Canvas; border: 1px solid CanvasText; box-shadow: none; }
+}
+
+/* A real material preview over application content, also useful without hardware. */
+.glass-material-preview { position: relative; display: grid; min-height: 156px; place-items: center; margin-top: 18px; overflow: hidden; border-radius: 16px; background: repeating-linear-gradient(0deg, transparent 0 23px, #516a9b14 24px 25px), repeating-linear-gradient(90deg, transparent 0 23px, #516a9b14 24px 25px), #e5edf8; }
+.glass-material-preview::before, .glass-material-preview::after { content: ""; position: absolute; width: 170px; height: 170px; border-radius: 50%; }
+.glass-material-preview::before { top: -50px; left: -10px; background: linear-gradient(135deg, var(--accent), #a9a9ff); }
+.glass-material-preview::after { right: -25px; bottom: -90px; background: linear-gradient(135deg, #77e1d0, #28b9c2); }
+.glass-material-preview__surface { position: relative; z-index: 1; display: grid; gap: 7px; width: 76%; padding: 21px 24px; border-radius: 23px; }
+.glass-material-preview__surface strong { font-size: 16px; letter-spacing: -.02em; }
+.glass-material-preview__surface span { color: #4e607e; font-size: 11px; }

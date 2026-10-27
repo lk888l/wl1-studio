@@ -9,6 +9,7 @@ import { NetworkProbe, preferredNetworkHost } from "./NetworkProbe";
 import type { DapProtocol, NetworkProbe as ProbeInfo } from "../../lib/sticks3-network";
 import { networkProbeOption } from "../../lib/firmware";
 import { FirmwarePage } from "../pages/FirmwarePage";
+import { LiquidGlass } from "../LiquidGlass";
 import "./StickS3Studio.css";
 
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
@@ -109,7 +110,7 @@ export function StickS3Studio({ onBack }: { onBack: () => void }) {
   };
 
   return <div className="s3-studio">
-    <aside className="s3-sidebar">
+    <LiquidGlass as="aside" className="s3-sidebar">
       <button type="button" className="s3-back" onClick={() => { void disconnect(true); }} disabled={firmwareBusy || busy === "正在释放 USB 连接"}><ArrowLeft size={16} />返回产品库</button>
       <div className="s3-brand"><span><Cpu size={25} /></span><div><strong>StickS3</strong><small>多功能设备工作台</small></div></div>
       <nav aria-label="S3 功能导航">
@@ -118,12 +119,12 @@ export function StickS3Studio({ onBack }: { onBack: () => void }) {
       </nav>
       <div className="s3-sidebar-note"><Cable size={22} /><strong>一个连接，多种用途</strong><p>通过 USB 管理无线网络。连接设置由 S3 保存，供调试器和后续无线功能共用。</p></div>
       <div className={`s3-link-state ${snapshot.connected ? "is-connected" : ""}`}><i /><div><strong>{snapshot.connected ? "USB 控制台已连接" : "USB 控制台未连接"}</strong><small>{snapshot.portName ?? (page === "dap" ? "IP 查找无需连接 USB" : "选择串口后连接")}</small></div></div>
-    </aside>
+    </LiquidGlass>
     <main className="s3-workspace">
-      <header className="s3-topbar"><span>设备控制中心 <ChevronRight size={14} /> StickS3 <ChevronRight size={14} /><strong>{page === "radio" ? "USB 配网与蓝牙" : "SWD / JTAG"}</strong></span><span className="s3-chip">ESP32-S3</span></header>
+      <LiquidGlass as="header" className="s3-topbar"><span>设备控制中心 <ChevronRight size={14} /> StickS3 <ChevronRight size={14} /><strong>{page === "radio" ? "USB 配网与蓝牙" : "SWD / JTAG"}</strong></span><span className="s3-chip">ESP32-S3</span></LiquidGlass>
       <div className="s3-content">
         {page === "radio" && <div className="s3-heading"><div><span className="s3-eyebrow">STICKS3 STUDIO</span><h1>通过 USB 配置无线连接</h1><p>首次使用时连接 USB，为 S3 配置 2.4 GHz Wi-Fi；取得 IP 后即可进行网络调试。</p></div><span className={`s3-chip ${snapshot.connected ? "is-online" : ""}`}>{snapshot.connected ? "设备在线" : "等待 USB 连接"}</span></div>}
-        {(page === "radio" || snapshot.connected) && <section className="s3-connectbar" aria-label="S3 USB 连接">
+        {(page === "radio" || snapshot.connected) && <LiquidGlass as="section" className="s3-connectbar" aria-label="S3 USB 连接">
           <Cable size={22} /><label htmlFor="s3-port">USB 控制台</label>
           <select id="s3-port" value={portName} disabled={firmwareBusy || snapshot.connected || Boolean(busy) || !isTauriRuntime()} onChange={(event) => setPortName(event.target.value)}>
             <option value="">{ports.length ? "请选择 StickS3 串口" : "未发现可用串口"}</option>
@@ -132,7 +133,7 @@ export function StickS3Studio({ onBack }: { onBack: () => void }) {
           <button type="button" className="s3-btn" disabled={firmwareBusy || snapshot.connected || Boolean(busy) || !isTauriRuntime()} onClick={() => { void run("正在刷新串口", refreshPorts); }} aria-label="刷新串口"><RefreshCw size={16} /></button>
           {snapshot.connected ? <button type="button" className="s3-btn" disabled={busy === "正在释放 USB 连接"} onClick={() => { void disconnect(false); }}><Unplug size={16} />断开 USB</button>
             : <button type="button" className="s3-btn is-primary" disabled={firmwareBusy || !portName || Boolean(busy) || !isTauriRuntime()} onClick={() => { void connect(); }}>连接 S3</button>}
-        </section>}
+        </LiquidGlass>}
         {page === "radio" && !isTauriRuntime() && <p className="s3-message"><Info size={17} />浏览器可浏览工作台；扫描、连接和保存需要使用桌面应用及真实 StickS3。</p>}
         {busy && <p className="s3-message" role="status"><LoaderCircle className="s3-spin" size={17} />{busy}…</p>}
         {error && <div className="s3-message is-error" role="alert"><Info size={17} /><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError("")}><X size={16} /></button></div>}

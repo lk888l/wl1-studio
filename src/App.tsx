@@ -30,6 +30,7 @@ import { LiveChart } from "./components/LiveChart";
 import { ConnectionModal } from "./components/ConnectionModal";
 import { ProductHome } from "./components/ProductHome";
 import { Sidebar } from "./components/Sidebar";
+import { LiquidGlass, LiquidGlassProvider } from "./components/LiquidGlass";
 import {
   buildParameterCommand,
   defaultParameterValues,
@@ -245,66 +246,68 @@ export default function App() {
       : launchTarget === "nfc" ? "NFC Studio" : launchTarget === "pet" ? "Pet Studio" : launchTarget === "sticks3" ? "StickS3 Studio" : "WL1 Studio";
 
   return (
-    <div
-      className="app-stage"
-      data-accent={personalization.accent}
-      data-glass={personalization.glassStrength}
-      data-reduced-motion={personalization.reducedMotion ? "true" : "false"}
-    >
-      {view === "products" ? (
-        <ProductHome
-          safetyState={catalogSafety}
-          safetyError={catalogSafetyError}
-          pianoPreviewEnabled={pianoPreviewEnabled}
-          launching={productTransition === "covering" ? launchTarget : null}
-          personalization={personalization}
-          personalizationPersisted={personalizationPersisted}
-          onPersonalizationChange={updatePersonalization}
-          onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
-          onOpenWl1={() => openProduct("wl1")}
-          onOpenPiano={() => openProduct("piano")}
-          onOpenGameBox={() => openProduct("gamebox")}
-          onOpenNfc={() => openProduct("nfc")}
-          onOpenStickS3={() => openProduct("sticks3")}
-          onOpenPet={() => openProduct("pet")}
-        />
-      ) : view === "wl1" ? (
-        <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
-      ) : view === "pet" ? (
-        <PetStudio onBack={() => setView("products")} />
-      ) : view === "gamebox" ? (
-        <GameBoxStudio onBack={() => setView("products")} />
-      ) : view === "nfc" ? (
-        <NfcStudio onBack={() => setView("products")} />
-      ) : view === "sticks3" ? (
-        <StickS3Studio onBack={() => setView("products")} />
-      ) : (
-        <PianoStudio onBack={() => setView("products")} />
-      )}
+    <LiquidGlassProvider strength={personalization.glassStrength} reducedMotion={personalization.reducedMotion}>
+      <div
+        className="app-stage"
+        data-accent={personalization.accent}
+        data-glass={personalization.glassStrength}
+        data-reduced-motion={personalization.reducedMotion ? "true" : "false"}
+      >
+        {view === "products" ? (
+          <ProductHome
+            safetyState={catalogSafety}
+            safetyError={catalogSafetyError}
+            pianoPreviewEnabled={pianoPreviewEnabled}
+            launching={productTransition === "covering" ? launchTarget : null}
+            personalization={personalization}
+            personalizationPersisted={personalizationPersisted}
+            onPersonalizationChange={updatePersonalization}
+            onRetrySafety={() => setCatalogSafetyAttempt((value) => value + 1)}
+            onOpenWl1={() => openProduct("wl1")}
+            onOpenPiano={() => openProduct("piano")}
+            onOpenGameBox={() => openProduct("gamebox")}
+            onOpenNfc={() => openProduct("nfc")}
+            onOpenStickS3={() => openProduct("sticks3")}
+            onOpenPet={() => openProduct("pet")}
+          />
+        ) : view === "wl1" ? (
+          <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
+        ) : view === "pet" ? (
+          <PetStudio onBack={() => setView("products")} />
+        ) : view === "gamebox" ? (
+          <GameBoxStudio onBack={() => setView("products")} />
+        ) : view === "nfc" ? (
+          <NfcStudio onBack={() => setView("products")} />
+        ) : view === "sticks3" ? (
+          <StickS3Studio onBack={() => setView("products")} />
+        ) : (
+          <PianoStudio onBack={() => setView("products")} />
+        )}
 
-      <PcMonitorStatus />
+        <PcMonitorStatus />
 
-      {productTransition !== "idle" && (
-        <div
-          className={`product-transition is-${productTransition}`}
-          role="status"
-          aria-label={`正在打开 ${launchLabel}`}
-        >
-          <span className="product-transition__wash" />
-          <span className="product-transition__content">
-            <span className="product-transition__mark" aria-hidden="true">
-              {launchTarget === "piano" ? <Music2 size={29} strokeWidth={2.2} />
-                : launchTarget === "gamebox" ? <Gamepad2 size={29} strokeWidth={2.2} />
-                  : launchTarget === "nfc" ? <Nfc size={29} strokeWidth={2.2} />
-                    : launchTarget === "sticks3" ? <Cpu size={29} strokeWidth={2.2} />
-                    : <Gauge size={29} strokeWidth={2.2} />}
-              <i />
+        {productTransition !== "idle" && (
+          <div
+            className={`product-transition is-${productTransition}`}
+            role="status"
+            aria-label={`正在打开 ${launchLabel}`}
+          >
+            <span className="product-transition__wash" />
+            <span className="product-transition__content">
+              <span className="product-transition__mark" aria-hidden="true">
+                {launchTarget === "piano" ? <Music2 size={29} strokeWidth={2.2} />
+                  : launchTarget === "gamebox" ? <Gamepad2 size={29} strokeWidth={2.2} />
+                    : launchTarget === "nfc" ? <Nfc size={29} strokeWidth={2.2} />
+                      : launchTarget === "sticks3" ? <Cpu size={29} strokeWidth={2.2} />
+                      : <Gauge size={29} strokeWidth={2.2} />}
+                <i />
+              </span>
+              <span><small>正在打开</small><strong>{launchLabel}</strong></span>
             </span>
-            <span><small>正在打开</small><strong>{launchLabel}</strong></span>
-          </span>
-        </div>
-      )}
-    </div>
+          </div>
+        )}
+      </div>
+    </LiquidGlassProvider>
   );
 }
 
@@ -685,7 +688,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
       <div className="ambient ambient--one" /><div className="ambient ambient--two" /><div className="ambient ambient--three" />
       <Sidebar page={page} robotName={personalization.robotName} connection={connection} onPageChange={navigate} onConnectionOpen={openConnection} />
       <div className="workspace">
-        <header className="topbar glass-panel">
+        <LiquidGlass as="header" className="topbar glass-panel">
           <div className="topbar-context">
             <button
               className="icon-button topbar-home-button"
@@ -702,7 +705,7 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
             <span className="topbar-clock"><Clock3 size={15} />{new Date().toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}</span>
             <button className={connected ? "connection-button is-online" : startupError ? "connection-button is-fault" : "connection-button"} type="button" onClick={openConnection}><span className="status-orb" /><div><small>{remote ? "REMOTE SERIAL OPEN" : connected ? "CONNECTED" : startupError ? "SAFETY LOCKED" : "OFFLINE"}</small><strong>{startupError ? "初始化失败" : connected ? connection.label : "连接设备"}</strong></div><Cable size={17} /></button>
           </div>
-        </header>
+        </LiquidGlass>
 
         <ConnectionModal connection={connection} ports={ports} bluetoothDevices={bluetoothDevices} loading={connectionBusy || firmwareBusy} startupReady={startupReady} error={connectionError} onRefresh={() => { if (startupReady) void refreshPorts(); else setStartupAttempt((value) => value + 1); }} onScanBluetooth={() => void scanBluetooth()} onConnect={(config) => { if (!firmwareBusy) void connect(config); }} onDisconnect={() => void disconnect()} />
 

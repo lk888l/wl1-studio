@@ -13,6 +13,7 @@ import {
 
 import type { ConnectionSnapshot, PageId } from "../types";
 import { isRemoteConnection } from "../lib/connection";
+import { LiquidGlass } from "./LiquidGlass";
 
 const navigation: Array<{ id: PageId; label: string; icon: LucideIcon }> = [
   { id: "tuning", label: "运动工作台", icon: SlidersHorizontal },
@@ -35,7 +36,7 @@ export function Sidebar({ page, robotName, connection, onPageChange, onConnectio
   const connected = connection.mode !== "disconnected";
   const remote = isRemoteConnection(connection);
   return (
-    <aside className="sidebar glass-panel" aria-label="主导航">
+    <LiquidGlass as="aside" className="sidebar glass-panel" aria-label="主导航">
       <div className="brand-lockup">
         <div className="brand-mark" aria-hidden="true">
           <Gauge size={24} strokeWidth={2.2} />
@@ -74,6 +75,6 @@ export function Sidebar({ page, robotName, connection, onPageChange, onConnectio
         </span>
         <Radio size={17} />
       </button>
-    </aside>
+    </LiquidGlass>
   );
 }
