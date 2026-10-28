@@ -48,7 +48,11 @@ export function PcMonitorPanel() {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
-  useEffect(() => { setSaved(saveMonitorConfig(config)); }, [config]);
+  useEffect(() => {
+    let cancelled = false;
+    void saveMonitorConfig(config).then((saved) => { if (!cancelled) setSaved(saved); });
+    return () => { cancelled = true; };
+  }, [config]);
   useEffect(() => {
     if (!snapshot.desktop || restoredNative) return;
     if (snapshot.desktop.monitorConfig) {
@@ -121,12 +125,12 @@ export function PcMonitorPanel() {
     {(error || snapshot.lastError) && <p className="pet-message is-error" role="alert">{error || snapshot.lastError}</p>}
     {desktop?.warning && <p className="pc-monitor-warning" role="status">{desktop.warning}</p>}
     <LiquidGlass as="section" variant="panel" className="pet-card pc-monitor-background" aria-labelledby="pc-monitor-background-title">
-      <div className="pet-section-title"><div><h2 id="pc-monitor-background-title"><Monitor size={18} />轻量后台</h2><p>关闭窗口后释放工作台界面，保留 Wi-Fi 采集和发送。从系统托盘打开控制中心即可恢复。</p></div><BackgroundButton compact /></div>
+      <div className="pet-section-title"><div><h2 id="pc-monitor-background-title"><Monitor size={18} />轻量后台</h2><p>进入轻量后台会释放工作台界面，保留 Wi-Fi 采集和发送。从系统托盘打开控制中心即可恢复。</p></div><BackgroundButton compact /></div>
       <div className="pc-monitor-preferences">
-        <label><input type="checkbox" checked={desktop?.preferences.startInBackground ?? true} disabled={!tauri || !desktop || savingPreferences} onChange={(event) => { void updatePreferences({ startInBackground: event.target.checked }); }} /><span><strong>启动时直接进入后台</strong><small>首次使用先打开配置界面；完成一次连接配置后生效。</small></span></label>
+        <label><input type="checkbox" checked={desktop?.preferences.startInBackground ?? false} disabled={!tauri || !desktop || savingPreferences} onChange={(event) => { void updatePreferences({ startInBackground: event.target.checked }); }} /><span><strong>启动时直接进入后台</strong><small>默认打开主窗口；开启后完成连接配置，下次启动进入后台。</small></span></label>
         <label><input type="checkbox" checked={desktop?.preferences.autoResume ?? true} disabled={!tauri || !desktop || savingPreferences} onChange={(event) => { void updatePreferences({ autoResume: event.target.checked }); }} /><span><strong>下次启动恢复上次传输</strong><small>主动停止后保持停止；退出程序时记住发送状态。</small></span></label>
       </div>
-      <p className="pc-monitor-background-note">{desktop?.trayAvailable ? "关闭窗口进入后台 · 托盘菜单可恢复界面、停止发送或退出程序。其他产品的设备连接会先释放。" : tauri ? "系统托盘尚未就绪或不可用，请最小化窗口继续发送；关闭窗口将退出程序。" : "后台运行与启动设置需要桌面应用。"}</p>
+      <p className="pc-monitor-background-note">{desktop?.trayAvailable ? desktop.preferences.closeBehavior === "exit" ? "当前关闭窗口会全部退出。可在个性设置中改为托盘模式；轻量后台按钮仍可保留监控传输。" : "当前关闭窗口进入轻量后台，其他产品连接会先释放。托盘可恢复界面、停止发送或退出；可在个性设置中更改关闭行为。" : tauri ? "系统托盘尚未就绪或不可用，请最小化窗口继续发送；关闭窗口将退出程序。" : "后台运行与启动设置需要桌面应用。"}</p>
     </LiquidGlass>
     <div className="pc-monitor-metrics">
       <Metric label="CPU" value={sample?.cpuPct ?? null} detail="整机处理器使用率" tone="cpu" />

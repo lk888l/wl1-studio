@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, KeyboardEvent, PointerEvent } from "react";
 import { isTauriRuntime } from "../../lib/device";
 import { PetCancelled, petGateway } from "../../lib/pet";
+import { registerStorageFlusher } from "../../lib/user-storage";
 import {
   PET_ACTIONS, PET_ACTION_LABELS, PET_FRAME_BYTES, PET_HEIGHT, PET_MAX_FRAMES, PET_PRESETS, PET_WIDTH,
   blankPetFrame, encodePetPackage, loadPetProject, makePetPreset, newPetProject,
@@ -95,6 +96,8 @@ export function PetStudio({ onBack }: { onBack: () => void }) {
   const imageInput = useRef<HTMLInputElement>(null);
   const imageRef = useRef<ImageBitmap | null>(null);
   const latestProject = useRef(project);
+  const saveGeneration = useRef(0);
+  latestProject.current = project;
   const active = useRef(false);
   const mounted = useRef(true);
   const uploadCancel = useRef(false);
@@ -111,12 +114,22 @@ export function PetStudio({ onBack }: { onBack: () => void }) {
   useEffect(() => petGateway.subscribe(setSnapshot), []);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; uploadCancel.current = true; imageRef.current?.close(); savePetProject(latestProject.current); };
+    return () => { mounted.current = false; uploadCancel.current = true; imageRef.current?.close(); void savePetProject(latestProject.current); };
   }, []);
+  useEffect(() => registerStorageFlusher(async () => {
+    const current = saveGeneration.current;
+    const saved = await savePetProject(latestProject.current);
+    if (mounted.current && current === saveGeneration.current) { setSaved(saved); setSavePending(false); }
+    if (!saved) throw new Error("桌宠工程尚未保存，请重试。");
+  }), []);
   useEffect(() => {
-    latestProject.current = project;
+    const current = ++saveGeneration.current;
     setSavePending(true);
-    const timer = setTimeout(() => { setSaved(savePetProject(project)); setSavePending(false); }, 350);
+    const timer = setTimeout(() => {
+      void savePetProject(project).then((saved) => {
+        if (mounted.current && current === saveGeneration.current) { setSaved(saved); setSavePending(false); }
+      });
+    }, 350);
     return () => clearTimeout(timer);
   }, [project]);
   useEffect(() => { if (canvasRef.current) paintCanvas(canvasRef.current, currentFrame); }, [currentFrame]);
@@ -258,8 +271,12 @@ export function PetStudio({ onBack }: { onBack: () => void }) {
   }
   function back() {
     if (active.current) return;
-    setSaved(savePetProject(project));
-    void run("释放 USB 串口", async () => { await petGateway.disconnect(); onBack(); });
+    void run("保存工程并释放 USB 串口", async () => {
+      const saved = await savePetProject(project);
+      setSaved(saved);
+      if (!saved) throw new Error("桌宠工程尚未保存，请重试后返回。");
+      await petGateway.disconnect(); onBack();
+    });
   }
 
   return <div className="pet-studio">

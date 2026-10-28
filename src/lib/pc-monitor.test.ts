@@ -60,7 +60,7 @@ describe("电脑监控工作任务与界面生命周期", () => {
     await gateway.refresh();
     await expect(gateway.start(config)).rejects.toThrow("桌面应用");
     await expect(gateway.enterBackground()).rejects.toThrow("桌面应用");
-    await expect(gateway.savePreferences({ startInBackground: true, autoResume: true })).rejects.toThrow("桌面应用");
+    await expect(gateway.savePreferences({ startInBackground: true, autoResume: true, closeBehavior: "tray" })).rejects.toThrow("桌面应用");
     expect(await gateway.devices()).toMatchObject({ gpus: [] });
     expect(gateway.getSnapshot().running).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe("电脑监控工作任务与界面生命周期", () => {
     let finishPoll: (snapshot: MonitorSnapshot) => void = () => { throw new Error("轮询未开始"); };
     invoke.mockImplementationOnce(() => new Promise<MonitorSnapshot>((resolve) => { finishPoll = resolve; }));
     const old = gateway.refresh();
-    const preferences = { startInBackground: false, autoResume: false };
+    const preferences = { startInBackground: false, autoResume: false, closeBehavior: "exit" as const };
     const updated = { ...running, desktop: { preferences, monitorConfig: config, trayAvailable: true, resources: {}, warning: null } };
     invoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(updated);
     await gateway.savePreferences(preferences);

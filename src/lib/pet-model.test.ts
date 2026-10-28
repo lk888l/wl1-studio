@@ -87,15 +87,15 @@ describe("桌宠工程与 PET1 二进制协议", () => {
     valid.actions.idle.frames.push(blankPetFrame());
     expect(original.actions.idle.frames).toHaveLength(1);
   });
-  it("损坏或不可用的本地存储不会阻止离线创作", () => {
+  it("损坏或不可用的本地存储不会阻止离线创作", async () => {
     const store = { getItem: vi.fn(() => "{broken"), setItem: vi.fn() };
     vi.stubGlobal("localStorage", store);
     expect(loadPetProject()).toEqual(makePetPreset(0));
-    expect(savePetProject(newPetProject())).toBe(true);
+    expect(await savePetProject(newPetProject())).toBe(true);
     const validWrites = store.setItem.mock.calls.length;
-    expect(savePetProject({ ...newPetProject(), name: "中文" })).toBe(false);
+    expect(await savePetProject({ ...newPetProject(), name: "中文" })).toBe(false);
     expect(store.setItem.mock.calls).toHaveLength(validWrites);
     store.setItem.mockImplementation(() => { throw new Error("quota"); });
-    expect(savePetProject(newPetProject())).toBe(false);
+    expect(await savePetProject(newPetProject())).toBe(false);
   });
 });

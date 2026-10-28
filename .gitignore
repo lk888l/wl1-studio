@@ -14,6 +14,7 @@ target/
 *.dSYM/
 
 # 本地环境与日志
+/.local/
 .env
 .env.*
 !.env.example

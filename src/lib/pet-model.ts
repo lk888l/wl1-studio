@@ -1,3 +1,5 @@
+import { getStoredItem, registerStorageValidator, setStoredItem } from "./user-storage";
+
 export const PET_WIDTH = 64;
 export const PET_HEIGHT = 32;
 export const PET_FRAME_BYTES = 256;
@@ -174,9 +176,11 @@ export function petCrc32(bytes: Uint8Array): string {
 
 const STORAGE_KEY = "studio.esp-c3.pet.v1";
 export function loadPetProject(): PetProject {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return validatePetProject(JSON.parse(raw)); } catch { /* An invalid draft never prevents opening the editor. */ }
+  try { const raw = getStoredItem(STORAGE_KEY); if (raw) return validatePetProject(JSON.parse(raw)); } catch { /* An invalid draft never prevents opening the editor. */ }
   return makePetPreset(0);
 }
-export function savePetProject(project: PetProject): boolean {
-  try { const valid = validatePetProject(project); localStorage.setItem(STORAGE_KEY, JSON.stringify(valid)); return true; } catch { return false; }
+export async function savePetProject(project: PetProject): Promise<boolean> {
+  try { const valid = validatePetProject(project); return await setStoredItem(STORAGE_KEY, JSON.stringify(valid)); } catch { return false; }
 }
+
+registerStorageValidator(STORAGE_KEY, validatePetProject);

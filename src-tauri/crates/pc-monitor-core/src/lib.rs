@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{mpsc, Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{MemoryRefreshKind, System};
@@ -188,7 +188,40 @@ struct Worker {
 }
 
 type NvmlResult = Result<Arc<Nvml>, String>;
-type NvmlCache = Arc<OnceLock<NvmlResult>>;
+type NvmlCache = Arc<RetryCache<Nvml>>;
+
+/// Share a successfully initialized driver, but let the next explicit request
+/// retry after a failed load. Hold the lock while loading so concurrent device
+/// discovery and sender startup do not initialize separate NVML instances.
+struct RetryCache<T> {
+    value: Mutex<Option<Arc<T>>>,
+    #[cfg(test)]
+    attempts: AtomicU32,
+}
+
+impl<T> Default for RetryCache<T> {
+    fn default() -> Self {
+        Self {
+            value: Mutex::new(None),
+            #[cfg(test)]
+            attempts: AtomicU32::new(0),
+        }
+    }
+}
+
+impl<T> RetryCache<T> {
+    fn get_or_try_init<E>(&self, initialize: impl FnOnce() -> Result<T, E>) -> Result<Arc<T>, E> {
+        let mut cached = lock(&self.value);
+        if let Some(value) = cached.as_ref() {
+            return Ok(Arc::clone(value));
+        }
+        #[cfg(test)]
+        self.attempts.fetch_add(1, Ordering::Relaxed);
+        let value = Arc::new(initialize()?);
+        *cached = Some(Arc::clone(&value));
+        Ok(value)
+    }
+}
 
 #[derive(Default)]
 pub struct Monitor {
@@ -202,13 +235,36 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn nvml(cache: &NvmlCache) -> NvmlResult {
-    cache
-        .get_or_init(|| {
-            Nvml::init()
-                .map(Arc::new)
-                .map_err(|error| format!("NVIDIA 监控不可用，CPU / 内存仍会发送：{error}"))
-        })
-        .clone()
+    cache.get_or_try_init(load_nvml)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn load_nvml() -> Result<Nvml, String> {
+    Nvml::init().map_err(|error| format!("NVIDIA 监控不可用，CPU / 内存仍会发送：{error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn load_nvml() -> Result<Nvml, String> {
+    let paths = pc_monitor_windows::nvml_library_paths()
+        .map_err(|error| format!("NVIDIA 监控不可用，CPU / 内存仍会发送：{error}"))?;
+    let mut errors = Vec::new();
+    for path in paths {
+        // These absolute paths come from Windows system/known-folder APIs, not
+        // the working directory or PATH. Standard drivers and DCH drivers put
+        // NVML in different directories.
+        match Nvml::builder().lib_path(path.as_os_str()).init() {
+            Ok(driver) => return Ok(driver),
+            Err(error) => errors.push(format!("{}：{error}", path.display())),
+        }
+    }
+    Err(format!(
+        "NVIDIA 监控不可用，CPU / 内存仍会发送：{}",
+        if errors.is_empty() {
+            "未找到可用的 NVML 驱动库路径".into()
+        } else {
+            errors.join("；")
+        }
+    ))
 }
 
 impl Monitor {
@@ -406,15 +462,23 @@ fn valid_gpu_memory(used: u64, total: u64) -> bool {
 struct Sampler {
     system: System,
     host: String,
+    #[cfg(not(target_os = "windows"))]
     cpu_refreshed: Instant,
+    #[cfg(target_os = "windows")]
+    cpu: pc_monitor_windows::CpuSampler,
     gpu: Option<(Arc<Nvml>, String, String)>,
     gpu_warning: Option<String>,
 }
 
 impl Sampler {
     fn new(driver: Option<NvmlResult>, gpu_uuid: Option<&str>) -> Self {
-        let mut system = System::new();
-        system.refresh_cpu_usage();
+        let system = System::new();
+        #[cfg(not(target_os = "windows"))]
+        let system = {
+            let mut system = system;
+            system.refresh_cpu_usage();
+            system
+        };
         let host = bounded_text(&System::host_name().unwrap_or_else(|| "PC".into()), 63);
         let host = if host.is_empty() { "PC".into() } else { host };
         let selection = driver
@@ -440,13 +504,19 @@ impl Sampler {
         Self {
             system,
             host,
+            #[cfg(not(target_os = "windows"))]
             cpu_refreshed: Instant::now(),
+            #[cfg(target_os = "windows")]
+            cpu: pc_monitor_windows::CpuSampler::new(),
             gpu,
             gpu_warning,
         }
     }
 
     fn sample(&mut self, session: &str, seq: u32) -> (MonitorSample, Option<String>) {
+        #[cfg(target_os = "windows")]
+        let (cpu_pct, cpu_warning) = self.cpu.sample();
+        #[cfg(not(target_os = "windows"))]
         let cpu_pct = if self.cpu_refreshed.elapsed() >= sysinfo::MINIMUM_CPU_UPDATE_INTERVAL {
             self.system.refresh_cpu_usage();
             self.cpu_refreshed = Instant::now();
@@ -454,6 +524,8 @@ impl Sampler {
         } else {
             None
         };
+        #[cfg(not(target_os = "windows"))]
+        let cpu_warning: Option<String> = None;
         self.system
             .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
         let total = self.system.total_memory();
@@ -511,6 +583,10 @@ impl Sampler {
                 Err(error) => warning = Some(format!("选定显卡暂时不可用：{error}")),
             }
         }
+        let warning = match (cpu_warning, warning) {
+            (Some(cpu), Some(gpu)) => Some(format!("{cpu}；{gpu}")),
+            (cpu, gpu) => cpu.or(gpu),
+        };
         (sample, warning)
     }
 }
@@ -642,6 +718,53 @@ mod tests {
     }
 
     #[test]
+    fn driver_initialization_retries_failure_and_reuses_success() {
+        let cache = RetryCache::<String>::default();
+        assert_eq!(
+            cache
+                .get_or_try_init(|| Err("driver unavailable"))
+                .unwrap_err(),
+            "driver unavailable"
+        );
+        assert!(lock(&cache.value).is_none());
+        let driver = cache
+            .get_or_try_init(|| Ok::<_, &str>("driver recovered".to_owned()))
+            .unwrap();
+        let reused = cache
+            .get_or_try_init(|| -> Result<String, &str> {
+                panic!("a successful driver must stay shared")
+            })
+            .unwrap();
+        assert_eq!(driver.as_str(), "driver recovered");
+        assert!(Arc::ptr_eq(&driver, &reused));
+        assert_eq!(cache.attempts.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn concurrent_driver_requests_initialize_only_once() {
+        let cache = Arc::new(RetryCache::<u32>::default());
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let workers: Vec<_> = (0..8)
+            .map(|_| {
+                let cache = Arc::clone(&cache);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    cache.get_or_try_init(|| Ok::<_, ()>(42)).unwrap()
+                })
+            })
+            .collect();
+        let drivers: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert!(drivers
+            .iter()
+            .all(|driver| Arc::ptr_eq(driver, &drivers[0])));
+        assert_eq!(cache.attempts.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
     fn config_defaults_and_validation() {
         let parsed: MonitorConfig = serde_json::from_str(r#"{"targetIp":"192.168.4.1"}"#)
             .expect("config without optional fields");
@@ -759,7 +882,11 @@ mod tests {
             stopped.last_error.is_none(),
             "disabled GPU has no driver warning"
         );
-        assert!(monitor.nvml.get().is_none(), "NVML is never initialized");
+        assert_eq!(
+            monitor.nvml.attempts.load(Ordering::Relaxed),
+            0,
+            "NVML initialization is never attempted"
+        );
     }
 
     #[test]

@@ -11,3 +11,6 @@ serde_json = "1"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 nvml-wrapper = "0.13.0"
 mio = { version = "1", features = ["net", "os-poll"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+pc-monitor-windows = { path = "../pc-monitor-windows" }

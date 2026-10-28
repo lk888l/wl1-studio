@@ -10,9 +10,10 @@ import {
   Save,
   ShieldCheck,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { CalibrationDraft, TelemetrySample } from "../../types";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "../../lib/user-storage";
 import { LiquidGlass } from "../LiquidGlass";
 
 interface CalibrationPageProps {
@@ -58,9 +59,7 @@ function finiteInRange(value: unknown, fallback: number, min: number, max: numbe
     : fallback;
 }
 
-function loadCalibrationDraft(): CalibrationDraft {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+function sanitizeCalibrationDraft(parsed: unknown): CalibrationDraft {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return { ...defaultDraft };
     const value = parsed as Record<string, unknown>;
     return {
@@ -73,9 +72,13 @@ function loadCalibrationDraft(): CalibrationDraft {
         ? value.updatedAt
         : undefined,
     };
-  } catch {
-    return { ...defaultDraft };
-  }
+}
+
+registerStorageValidator(STORAGE_KEY, sanitizeCalibrationDraft);
+
+function loadCalibrationDraft(): CalibrationDraft {
+  try { return sanitizeCalibrationDraft(JSON.parse(getStoredItem(STORAGE_KEY) ?? "{}")); }
+  catch { return { ...defaultDraft }; }
 }
 
 export function CalibrationPage({ connected, writesUnlocked, samples, onSendText }: CalibrationPageProps) {
@@ -83,6 +86,8 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
   const [draft, setDraft] = useState<CalibrationDraft>(loadCalibrationDraft);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const latest = samples.at(-1);
   const sampleWindow = useMemo(() => {
     const seen = new Set<number>();
@@ -123,15 +128,17 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
     }
   };
 
-  const finish = (): void => {
+  const finish = async (): Promise<void> => {
     const saved = { ...draft, updatedAt: Date.now() };
+    setBusy(true);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      if (!await setStoredItem(STORAGE_KEY, JSON.stringify(saved))) throw new Error("配置写入失败");
+      if (!mounted.current) return;
       setDraft(saved);
       setNotice("标定记录已保存在本机。可写运动参数需另行下发，断电保持请在运动工作台保存到 Flash。");
     } catch {
-      setNotice("无法写入本机存储；当前标定草稿仍保留在页面内存中。");
-    }
+      if (mounted.current) setNotice("无法写入本机存储；当前标定草稿仍保留在页面内存中。");
+    } finally { if (mounted.current) setBusy(false); }
   };
 
   return (
@@ -212,7 +219,7 @@ export function CalibrationPage({ connected, writesUnlocked, samples, onSendText
                 <div><dt>共同腿高</dt><dd>{draft.legHeight.toFixed(1)} mm</dd></div>
                 <div><dt>持久化状态</dt><dd className="text-warning">仅上位机本地</dd></div>
               </dl>
-              <button className="primary-button" type="button" onClick={finish}><Save size={17} />保存本地标定记录</button>
+              <button className="primary-button" type="button" disabled={busy} onClick={() => { void finish(); }}><Save size={17} />保存本地标定记录</button>
             </div>
           )}
 

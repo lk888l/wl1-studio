@@ -1,8 +1,12 @@
 //! Native tray and settings survive destruction of the main WebView.
 pub(crate) mod bridge;
+pub(crate) mod lifecycle;
+mod portable;
 mod resources;
 mod settings;
+pub(crate) mod storage_api;
 mod ui_process;
+mod user_config;
 
 use pc_monitor_core::{MonitorConfig, MonitorSnapshot};
 use serde::{Deserialize, Serialize};
@@ -27,12 +31,16 @@ struct TrayControls {
 #[derive(Default)]
 pub struct DesktopState {
     settings: Mutex<SettingsStore>,
+    user_config: Mutex<user_config::UserConfigStore>,
     resources: Mutex<ResourceSampler>,
     warning: Mutex<Option<String>>,
     tray: OnceLock<TrayControls>,
     tray_available: AtomicBool,
     foreground: AtomicBool,
     transitioning: AtomicBool,
+    ui_ready: AtomicBool,
+    exit_authorized: AtomicBool,
+    close: Mutex<lifecycle::CloseState>,
     ui: ui_process::UiProcess,
 }
 
@@ -69,10 +77,14 @@ impl DesktopState {
 
     pub fn snapshot(&self, monitor: &MonitorSnapshot) -> DesktopSnapshot {
         let store = lock(&self.settings);
-        let warning = [store.warning.clone(), lock(&self.warning).clone()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+        let warning = [
+            store.warning.clone(),
+            lock(&self.user_config).warning.clone(),
+            lock(&self.warning).clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
         DesktopSnapshot {
             preferences: store.saved.preferences.clone(),
             monitor_config: store.saved.monitor_config.clone(),
@@ -203,8 +215,7 @@ async fn enter_background(app: AppHandle) -> Result<(), String> {
         return Err("系统托盘不可用，请保留或最小化窗口以继续传输".into());
     }
     if !is_ui_worker() {
-        desktop.ui.send(ui_process::Control::Background)?;
-        return Ok(());
+        return Err("请先打开控制中心，再进入轻量后台".into());
     }
     if desktop.transitioning.swap(true, Ordering::AcqRel) {
         return Ok(());
@@ -226,12 +237,15 @@ async fn enter_background(app: AppHandle) -> Result<(), String> {
             return Err(error);
         }
         if let Some(window) = handle.get_webview_window("main") {
+            lifecycle::authorize_exit(&handle, true);
             if let Err(error) = window.destroy() {
+                lifecycle::authorize_exit(&handle, false);
                 desktop.foreground.store(true, Ordering::Release);
                 return Err(format!("无法释放控制中心窗口：{error}"));
             }
         }
         *lock(&desktop.resources) = ResourceSampler::default();
+        lifecycle::authorize_exit(&handle, true);
         // Exit the disposable UI runtime as well as its WebView. The tray
         // process keeps the same sampler/socket/session without interruption.
         handle.exit(0);
@@ -250,18 +264,25 @@ async fn enter_background(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn request_background(app: &AppHandle) {
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(error) = enter_background(handle.clone()).await {
-            report_error(&handle, error);
-            request_show_main(&handle);
-        }
-    });
+    if is_ui_worker() {
+        lifecycle::request(app, lifecycle::CloseAction::Background);
+    } else if let Err(error) = app
+        .state::<DesktopState>()
+        .ui
+        .send(ui_process::Control::Background)
+    {
+        report_error(app, error);
+        request_show_main(app);
+    }
+}
+
+pub fn request_close(app: &AppHandle) {
+    lifecycle::request(app, lifecycle::CloseAction::Close);
 }
 
 #[tauri::command]
 pub async fn desktop_enter_background(app: AppHandle) -> Result<(), String> {
-    enter_background(app).await
+    lifecycle::prepare(&app, lifecycle::CloseAction::Background)
 }
 
 #[tauri::command]
@@ -276,6 +297,7 @@ pub async fn desktop_save_preferences(
                 _ => Err("后台设置保存响应无效".into()),
             };
         }
+        storage_api::ensure_writable(&app)?;
         let desktop = app.state::<DesktopState>();
         let mut store = lock(&desktop.settings);
         store.saved.preferences = preferences;
@@ -401,12 +423,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         show_main(handle)?;
         return Ok(());
     }
-    match handle.path().app_config_dir() {
-        Ok(directory) => {
-            *lock(&desktop.settings) = SettingsStore::load(directory.join("background-v1.json"))
-        }
-        Err(error) => report_error(handle, format!("无法取得后台配置目录：{error}")),
-    }
+    storage_api::initialize(handle);
     let tray_result = if tray_host_available() {
         build_tray(handle)
     } else {
@@ -418,8 +435,9 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     }
     desktop.ui.initialize(handle)?;
     let saved = lock(&desktop.settings).saved.clone();
-    let mut startup_failed = lock(&desktop.settings).warning.is_some();
-    if let Some(config) = saved.resume_config() {
+    let status = storage_api::status(handle);
+    let mut startup_failed = status.warning.is_some() || status.blocked;
+    if let Some(config) = (!status.blocked).then(|| saved.resume_config()).flatten() {
         if let Err(error) = crate::pc_monitor::start(handle, config) {
             report_error(handle, format!("无法恢复上次传输：{error}"));
             startup_failed = true;

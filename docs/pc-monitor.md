@@ -8,12 +8,12 @@
 4. MCU 打开 **Tools → PC Monitor**，Up / Down 或 Enter 翻页，Back 返回。总览显示 CPU / RAM / GPU；详情显示内存、显存和 GPU 温度。
 
 电脑端不需要先连接 USB。返回产品库、切换产品和最小化不会停止监控；右下角全局状态条提供停止与轻量后台入口。
-点击 **轻量后台运行** 或关闭窗口，会释放整个工作台进程，只保留原生托盘和采集/发送驱动。
+点击 **轻量后台运行** 会释放整个工作台进程，只保留原生托盘和采集/发送驱动。窗口关闭默认执行同样操作；在产品库的 **个性设置 → 关闭窗口时** 可改为 **全部退出**，选择自动保存，重启后继续生效。
 托盘菜单提供 **打开控制中心 / 轻量后台运行 / 恢复 Wi-Fi 传输 / 停止 Wi-Fi 传输 / 退出 WL1 Studio**。
 Linux 使用右键托盘菜单；Windows 也可左键托盘恢复界面。
 
-首次启动显示配置界面。成功开始一次监控后，默认在下次启动时直接进入后台，并恢复上次仍在运行的发送任务。
-在电脑监控页可分别关闭 **启动时直接进入后台**、**下次启动恢复上次传输**。
+默认启动时打开主窗口；成功配置监控后，下次启动仍显示主窗口，并恢复上次仍在运行的发送任务。
+在电脑监控页可按需开启 **启动时直接进入后台**，或关闭 **下次启动恢复上次传输**。之前已保存的后台启动选择会继续保留，可取消勾选以恢复窗口启动。
 主动点击停止会记住停止状态；从托盘退出会立即结束当前发送，但保留下次启动的恢复意图。
 仅启动软件时应用这些选项，系统开机启动项可按需要指向应用并添加 `--background`。
 
@@ -22,9 +22,9 @@ Linux 使用右键托盘菜单；Windows 也可左键托盘恢复界面。
 重复启动会复用已有托盘/驱动；普通启动或 `--show` 恢复窗口，`--background` 保持后台。
 开发环境可用 `npm run tauri -- dev -- -- --show` 强制显示工作台。
 
-后台设置、最后成功的 IP / GPU 采集开关 / 显卡 / 周期及运行意图，保存在 Tauri 应用配置目录的 `background-v1.json`，通过临时文件替换保存。
-Windows 为用户的 Roaming AppData 下的应用目录，Linux 为 `$XDG_CONFIG_HOME/io.github.wl1.studio`（通常是 `~/.config/io.github.wl1.studio`）。
-配置读取/保存失败会在界面提示；损坏配置不会自动发送。浏览器只提供配置预览，不模拟采集或发送。采样仅保存在内存。
+后台设置、关闭选择、最后成功的 IP / GPU 采集开关 / 显卡 / 周期及运行意图，保存在 `.local/background-v1.json`，通过临时文件替换保存。
+开发运行使用工程根目录的 `.local`；发布程序使用可执行文件旁的 `.local`；AppImage 使用外部 `.AppImage` 文件旁的 `.local`。个性设置页显示实际目录，目录不受启动工作目录影响。旧系统目录配置只在首次迁移时读取，原文件保留，后续写入统一使用便携目录。
+配置读取/保存失败会在界面提示；目录不可写时仅本次会话生效，不回退到 AppData。损坏配置不会自动发送或被默认值覆盖。关闭及进入后台前会等待已请求保存的内容写入，失败时可重试或明确放弃保存。完整迁移范围见 [便携式配置说明](portable-storage.md)。浏览器只提供配置预览，不模拟采集或发送。采样仅保存在内存。
 
 进入轻量后台前，工作台会释放其他产品的 USB、蓝牙和演示会话；正在刷写固件或进行探针网络操作时，会保留窗口直至操作完成。
 后台期间不接受新的产品连接或固件任务，恢复工作台后可正常使用。
@@ -45,10 +45,12 @@ CPU 按逻辑处理器数归一化，整机总算力为 100%。首次采样建�
 
 ## 采集与协议
 
-CPU / RAM 使用 sysinfo，RAM 已用取 total - available，首个 CPU 样本用于建立基线。
-CPU 业务代码直接调用 `refresh_cpu_usage()` / `global_cpu_usage()`。Linux 的 `/proc/stat` 提供累计 CPU 时间，sysinfo 通过相邻采样差分得到占用率；Windows 的 sysinfo 已使用 PDH 读取格式化占用比例，系统计数器内部同样需要两次采样。
-占用率描述一个时间段，不能用单次累计时间读取替代。保留现有采样方式，不额外启动外部命令或引入内核模块。依据：[Linux 内核文档](https://www.kernel.org/doc/html/latest/filesystems/proc.html#miscellaneous-kernel-statistics-in-proc-stat)、[Microsoft PDH 文档](https://learn.microsoft.com/en-us/windows/win32/perfctrs/collecting-performance-data)。
+RAM 使用 sysinfo，已用取 total - available；Windows 底层读取 `GlobalMemoryStatusEx`。首个 CPU 样本用于建立基线。
+Linux 等非 Windows 平台继续使用 sysinfo 的 `refresh_cpu_usage()` / `global_cpu_usage()`；Linux 通过 `/proc/stat` 相邻采样的累计 CPU 时间差得到占用率。
+Windows 使用独立的轻量适配库 `pc-monitor-windows`，只维护一个英语 PDH `Processor Information(_Total)` 空闲率计数器，再换算为整机占用率，覆盖处理器组，不再逐核查询。读取时检查 API 返回值和计数器状态；失败返回 N/A 并提示原因，退避后重建计数器，重新建立基线。
+占用率描述一个时间段，不能用单次累计时间读取替代。采集不启动外部命令或引入内核模块。依据：[Linux 内核文档](https://www.kernel.org/doc/html/latest/filesystems/proc.html#miscellaneous-kernel-statistics-in-proc-stat)、[Microsoft PDH 文档](https://learn.microsoft.com/en-us/windows/win32/perfctrs/collecting-performance-data)。
 NVIDIA 指标通过运行时加载的 NVML 获取，利用已有显卡驱动。采集和 UDP 发送不启动外部采样命令。
+Windows 通过系统目录与 Program Files 已知文件夹 API 定位 DCH / 标准驱动的 `nvml.dll`，仅尝试绝对路径，不依赖当前目录或 PATH。成功初始化的驱动实例共享复用；初始化失败不会永久缓存，刷新显卡或重新开始监控时可再次尝试。运行会话的 GPU 选择在开始时确定，驱动恢复后可重新开始监控以应用。
 **采集 NVIDIA GPU** 默认开启，兼容旧配置。关闭后保留上次显卡选择，仅采集和发送 CPU / RAM；GPU 占用、显存和温度在协议中保持原字段并发送 null，界面显示“GPU 采集已关闭”。
 运行中切换开关会重建传输会话并保存，设备连接短暂刷新；后台自动恢复沿用该设置。关闭状态冷启动及打开监控页均不会枚举显卡或初始化 NVML，也不会提示缺少 GPU。
 已加载的 NVML 缓存随后台进程退出释放；关闭开关立即停止 GPU 查询。比较两种模式的常驻内存时，应分别冷启动测量。
@@ -57,12 +59,13 @@ GPU 占用率取 GPU 利用率，显存取 memory_info.used / total；容量以 
 
 轻量核心在 `src-tauri/crates/pc-monitor-core`，不依赖 Tauri、React、窗口或配置存储。
 原生托盘/驱动进程独立持有核心，工作台按需启动为同一程序的子进程；关闭工作台会回收其 WebView、WebKit 网络进程及缓存，避免仅隐藏窗口或销毁 WebView 后仍残留浏览器内存。
-两者使用仅绑定 `127.0.0.1` 的私有连接，以每次启动随机生成的 256 位凭据验证，消息有 16 KiB 长度限制，仅开放监控、后台偏好及界面退出确认。
+两者使用仅绑定 `127.0.0.1` 的私有连接，以每次启动随机生成的 256 位凭据验证。普通监控与控制消息限制为 16 KiB；按固定配置键读写的配置消息限制为 16 MiB，不开放任意路径或命令访问。
 工作台仍使用 `pc_monitor_start / pc_monitor_stop / pc_monitor_snapshot / pc_monitor_devices`；适配层将请求转交同一后台核心。
 硬件产品会话和固件任务由工作台进程独占；托盘退出会先等待工作台接受退出，继续保持固件忙时的退出保护。
 
 发送线程通过网络就绪事件、采样截止时间和停止唤醒运行，取消原先每 20 ms 的固定唤醒。
 资源统计仅由工作台快照请求触发，每秒最多采样一次；仅枚举进程关系、刷新本程序进程树的 CPU/RSS，不采集进程命令行或环境变量。
+Windows 每三秒最多进行一次 Toolhelp 进程关系快照，只为本程序进程树打开并保留查询句柄，每秒读取进程时间与工作集；退出进程的句柄会释放，新增子进程最多延迟一个关系刷新周期纳入统计。进程 CPU 使用时间差按所有处理器组的逻辑处理器总数归一化。非 Windows 平台沿用 sysinfo 的进程采集方式。
 进入轻量后台后，工作台进程及资源轮询全部结束，传输会话、UDP 端口和采样频率保持不变。
 UDP 4443 发送完整 JSON v1；会话、序号、限长和 MCU ACK 防止旧回执误报连接。3 秒无回执或设备无更新标记过期。当前面向单台电脑向一个 MCU 发送，手动指定 IP。
 
@@ -106,3 +109,14 @@ cargo run --manifest-path src-tauri/Cargo.toml -p pc-monitor-core --example send
 - 核心测试额外验证关闭时 NVML 缓存未初始化，保留的失效显卡 UUID 不影响 CPU / RAM / ACK；前端测试覆盖切换期间点击停止的会话竞态。
 
 本轮 `npm run check:frontend` 通过 216 个测试，`npm run check:rust` 通过 177 个测试，13 个依赖其他实机条件的测试保持跳过。
+
+### Windows 专项优化验证（2026-10-27）
+
+在 Windows 本机、NVIDIA GeForce RTX 3050 Laptop GPU 上验证本轮改动：
+
+- 单个 PDH 总量计数器的真实采样测试通过；增加短时 CPU 负载后，后续样本能反映占用变化，首样本仍为 N/A。
+- 复用核心 `send` 示例，在本地 UDP 回执端分别验证 GPU 开启和关闭两种模式，各发送 6 个报文且收到有效 ACK。GPU 开启时取得真实 NVIDIA 指标；关闭时 GPU 字段为 null，两种模式均无采样警告。
+- Windows 原生资源采样测试验证真实子进程的发现、关系快照缓存及退出后的句柄释放；桌面资源统计回归确认 CPU 差分没有被进程发现覆盖。
+- `cargo fmt --all -- --check` 与完整工作区 Clippy（`-D warnings`）通过。工作区测试 170 项通过，15 项默认忽略：13 项依赖其他硬件，另外两项为单独执行并通过的 PDH 专项和由父测试调用的子进程辅助入口。
+
+本次数据链路使用本地回执端，未重新进行 ESP32-C3 实板验收，也未给出 Windows 发布构建的 CPU / 内存节省百分比。休眠、切网及 UDP 异常恢复不在本轮改动范围内。

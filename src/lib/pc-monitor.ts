@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useSyncExternalStore } from "react";
 import { isTauriRuntime } from "./device";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "./user-storage";
 
 export interface MonitorConfig {
   targetIp: string;
@@ -40,6 +41,7 @@ export interface MonitorSnapshot {
 export interface DesktopPreferences {
   startInBackground: boolean;
   autoResume: boolean;
+  closeBehavior: "tray" | "exit";
 }
 export interface DesktopResources {
   cpuPct: number | null;
@@ -83,12 +85,12 @@ export function sanitizeMonitorConfig(value: unknown): MonitorConfig {
   };
 }
 export function loadMonitorConfig(): MonitorConfig {
-  try { return sanitizeMonitorConfig(JSON.parse(localStorage.getItem(CONFIG_KEY) ?? "null")); }
+  try { return sanitizeMonitorConfig(JSON.parse(getStoredItem(CONFIG_KEY) ?? "null")); }
   catch { return { ...defaultMonitorConfig }; }
 }
-export function saveMonitorConfig(config: MonitorConfig): boolean {
-  try { localStorage.setItem(CONFIG_KEY, JSON.stringify(sanitizeMonitorConfig(config))); return true; }
-  catch { return false; }
+registerStorageValidator(CONFIG_KEY, sanitizeMonitorConfig);
+export function saveMonitorConfig(config: MonitorConfig): Promise<boolean> {
+  return setStoredItem(CONFIG_KEY, JSON.stringify(sanitizeMonitorConfig(config)));
 }
 export function emptyMonitorSnapshot(): MonitorSnapshot {
   return { running: false, sessionId: null, targetIp: null, gpuEnabled: true, gpuUuid: null, intervalMs: 500, sample: null, ackAgeMs: null, connected: false, lastError: null, samplesSent: 0, bytesSent: 0, desktop: null };
@@ -173,6 +175,9 @@ export class PcMonitorGateway {
   }
   savePreferences(preferences: DesktopPreferences): Promise<void> {
     return this.desktopAction("desktop_save_preferences", { preferences }, true);
+  }
+  async waitForChanges(): Promise<void> {
+    await this.queue;
   }
   async devices(): Promise<MonitorDevices> {
     if (!isTauriRuntime()) return { gpus: [], warning: "桌面应用可以采集本机 CPU、内存与 NVIDIA GPU 指标。" };

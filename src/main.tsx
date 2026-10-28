@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import { DesktopLifecycle } from "./components/DesktopLifecycle";
+import { StorageBootstrap } from "./components/StorageBootstrap";
 import "./styles.css";
 import "./components/piano/PianoStudio.css";
 import "./components/LiquidGlass.css";
@@ -13,6 +15,7 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <DesktopLifecycle />
+    <StorageBootstrap><App /></StorageBootstrap>
   </StrictMode>,
 );

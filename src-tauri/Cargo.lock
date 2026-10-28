@@ -2891,9 +2891,17 @@ version = "0.1.0"
 dependencies = [
  "mio",
  "nvml-wrapper",
+ "pc-monitor-windows",
  "serde",
  "serde_json",
  "sysinfo",
+]
+
+[[package]]
+name = "pc-monitor-windows"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5500,6 +5508,7 @@ dependencies = [
  "ihex",
  "object",
  "pc-monitor-core",
+ "pc-monitor-windows",
  "probe-rs",
  "serde",
  "serde_json",

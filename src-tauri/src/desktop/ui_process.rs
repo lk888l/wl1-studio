@@ -140,6 +140,7 @@ pub fn confirm_quit(app: &AppHandle, code: Option<i32>) -> bool {
     match bridge::call(bridge::Request::UiQuitAccepted) {
         Ok(bridge::Reply::Saved) => true,
         _ => {
+            super::lifecycle::authorize_exit(app, false);
             super::report_error(app, "暂时无法通知后台退出，请稍后重试".into());
             super::request_show_main(app);
             false
@@ -156,7 +157,9 @@ pub fn listen(app: &AppHandle) -> Result<(), String> {
                 match line.as_deref() {
                     Ok("show") => super::request_show_main(&app),
                     Ok("background") => super::request_background(&app),
-                    Ok("quit") => app.exit(QUIT_APPLICATION),
+                    Ok("quit") => {
+                        super::lifecycle::request(&app, super::lifecycle::CloseAction::Quit)
+                    }
                     _ => break,
                 }
             }
@@ -167,7 +170,7 @@ pub fn listen(app: &AppHandle) -> Result<(), String> {
 
 pub fn request_quit(app: &AppHandle) {
     if is_worker() {
-        app.exit(QUIT_APPLICATION);
+        super::lifecycle::request(app, super::lifecycle::CloseAction::Quit);
         return;
     }
     match app.state::<DesktopState>().ui.send(Control::Quit) {
@@ -175,6 +178,11 @@ pub fn request_quit(app: &AppHandle) {
         Ok(false) => app.exit(0),
         Err(error) => super::report_error(app, error),
     }
+}
+
+pub fn quit_now(app: &AppHandle) {
+    super::lifecycle::authorize_exit(app, true);
+    app.exit(if is_worker() { QUIT_APPLICATION } else { 0 });
 }
 
 pub fn defer_exit_to_ui(app: &AppHandle) -> bool {

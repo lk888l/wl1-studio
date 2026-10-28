@@ -8,13 +8,16 @@ import { RadioConnections, type S3Run } from "./RadioConnections";
 import { NetworkProbe, preferredNetworkHost } from "./NetworkProbe";
 import type { DapProtocol, NetworkProbe as ProbeInfo } from "../../lib/sticks3-network";
 import { networkProbeOption } from "../../lib/firmware";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "../../lib/user-storage";
 import { FirmwarePage } from "../pages/FirmwarePage";
 import { LiquidGlass } from "../LiquidGlass";
 import "./StickS3Studio.css";
 
 const errorText = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 const portKey = "studio.sticks3.port.v1";
-function preferredPort(): string { try { return localStorage.getItem(portKey) ?? ""; } catch { return ""; } }
+function validatePort(value: unknown): string { if (typeof value !== "string" || value.length > 256) throw new Error("串口偏好无效"); return value.trim(); }
+registerStorageValidator(portKey, validatePort);
+function preferredPort(): string { try { return validatePort(getStoredItem(portKey) ?? ""); } catch { return ""; } }
 
 export function StickS3Studio({ onBack }: { onBack: () => void }) {
   const [snapshot, setSnapshot] = useState(sticks3Gateway.snapshot);
@@ -90,7 +93,7 @@ export function StickS3Studio({ onBack }: { onBack: () => void }) {
   };
   const connect = () => run("正在连接 S3 并确认固件", async () => {
     await sticks3Gateway.connect(portName);
-    try { localStorage.setItem(portKey, portName); } catch { /* Port preference is optional. */ }
+    await setStoredItem(portKey, portName);
     await sticks3Gateway.refresh();
   }, "S3 已连接，可以管理设备的 Wi-Fi 和 BLE。");
   const openNetwork = (ip: string) => {

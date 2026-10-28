@@ -410,6 +410,23 @@ code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
 .settings-footer > div { flex: 1; }
 .settings-footer strong { font-size: 13px; }
 .settings-footer p { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.desktop-settings-card { grid-column: 1 / -1; }
+.desktop-settings-card .radio-stack { margin-top: 0; }
+.desktop-settings-note { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.desktop-settings-error { margin-top: 12px; color: #a33f35; font-size: 12px; overflow-wrap: anywhere; }
+.storage-directory { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; min-width: 0; }
+.storage-directory > svg { flex: 0 0 auto; margin-top: 3px; }
+.storage-directory strong, .storage-directory code, .storage-directory small { display: block; }
+.storage-directory code { margin-top: 5px; overflow-wrap: anywhere; font-size: 12px; }
+.storage-directory small { margin-top: 6px; color: var(--muted); line-height: 1.6; }
+.storage-startup { display: grid; min-height: 100vh; place-items: center; padding: 28px; background: #eef3fb; color: #26364b; }
+.storage-dialog { width: min(580px, 100%); max-height: 90vh; overflow: auto; padding: 28px; color: #26364b; background: #f8faff; border: 1px solid #d9e1ef; border-radius: 22px; box-shadow: 0 24px 90px #16233830; }
+.storage-close-dialog { margin: auto; width: min(580px, calc(100vw - 48px)); }
+.storage-close-dialog::backdrop { background: rgba(22,35,56,.35); backdrop-filter: blur(8px); }
+.storage-dialog h1, .storage-dialog h2 { margin-top: 16px; font-size: 21px; }
+.storage-dialog p { margin-top: 12px; line-height: 1.7; overflow-wrap: anywhere; font-size: 13px; }
+.storage-dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+.storage-warning { position: fixed; z-index: 1100; top: 12px; left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); display: grid; gap: 4px; padding: 12px 18px; border: 1px solid #dcc390; border-radius: 12px; color: #795819; background: #fff8e8; box-shadow: 0 8px 28px #26364b18; font-size: 12px; overflow-wrap: anywhere; }
 
 /* Diagnostics */
 .diagnostics-layout { display: grid; grid-template-columns: minmax(0, 1fr) 275px; gap: 14px; }

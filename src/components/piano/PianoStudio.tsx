@@ -40,6 +40,7 @@ import {
   Zap,
 } from "lucide-react";
 import { LiquidGlass } from "../LiquidGlass";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "../../lib/user-storage";
 
 type PianoPage = "overview" | "composer" | "keymap" | "library" | "firmware";
 
@@ -160,10 +161,27 @@ function makeBindings(tonic: number, octave: number): KeyBinding[] {
   }));
 }
 
+function sanitizeStoredState(value: unknown): StoredPianoState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const input = value as Record<string, unknown>;
+  const integer = (candidate: unknown, min: number, max: number): candidate is number => typeof candidate === "number" && Number.isInteger(candidate) && candidate >= min && candidate <= max;
+  const result: StoredPianoState = {};
+  if (typeof input.title === "string") result.title = input.title.slice(0, 80);
+  if (integer(input.bpm, 40, 240)) result.bpm = input.bpm;
+  if (integer(input.tonic, 0, 11)) result.tonic = input.tonic;
+  if (integer(input.octave, 0, 8)) result.octave = input.octave;
+  if (Array.isArray(input.notes)) result.notes = input.notes.filter((note): note is PianoNote => note && typeof note === "object" && typeof note.id === "string" && integer(note.lane, 0, 7) && integer(note.beat, 0, TOTAL_BEATS - 1) && typeof note.duration === "number" && Number.isFinite(note.duration) && note.duration > 0 && note.duration <= TOTAL_BEATS);
+  if (Array.isArray(input.bindings) && input.bindings.length === 8 && input.bindings.every((binding, index) => binding && typeof binding === "object" && binding.index === index && typeof binding.shortcut === "string" && binding.shortcut.length <= 8 && integer(binding.midi, 0, 127))) result.bindings = input.bindings;
+  if (Array.isArray(input.slots) && input.slots.length === 8 && input.slots.every((slot, index) => slot && typeof slot === "object" && slot.slot === index + 1 && (slot.title === null || typeof slot.title === "string") && integer(slot.notes, 0, 100_000) && integer(slot.bytes, 0, 100_000) && (slot.updatedAt === undefined || typeof slot.updatedAt === "string"))) result.slots = input.slots;
+  return result;
+}
+
+registerStorageValidator(STORAGE_KEY, sanitizeStoredState);
+
 function readStoredState(): StoredPianoState | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) as StoredPianoState : null;
+    const raw = getStoredItem(STORAGE_KEY);
+    return raw ? sanitizeStoredState(JSON.parse(raw)) : null;
   } catch {
     return null;
   }
@@ -217,6 +235,10 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const draftSnapshot = useMemo(() => ({ title, bpm, tonic, octave, notes, bindings, slots }), [title, bpm, tonic, octave, notes, bindings, slots]);
+  const latestDraft = useRef(draftSnapshot);
+  latestDraft.current = draftSnapshot;
+  const mounted = useRef(true);
   const audioContext = useRef<AudioContext | null>(null);
   const connectionTimer = useRef<number | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -275,16 +297,19 @@ export function PianoStudio({ onBack }: PianoStudioProps) {
     if (audioContext.current) void audioContext.current.close();
   }, []);
 
-  const persistStudio = useCallback((announce = true) => {
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+
+  const persistStudio = useCallback(async (announce = true) => {
     try {
-      const snapshot: StoredPianoState = { title, bpm, tonic, octave, notes, bindings, slots };
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      setDirty(false);
+      const snapshot = latestDraft.current;
+      if (!await setStoredItem(STORAGE_KEY, JSON.stringify(snapshot))) throw new Error("配置写入失败");
+      if (!mounted.current) return;
+      if (snapshot === latestDraft.current) setDirty(false);
       if (announce) showToast("项目已保存到本机。");
     } catch {
-      showToast("本机存储不可用，当前修改仅保留在本次会话中。");
+      if (mounted.current) showToast("本机存储不可用，当前修改仅保留在本次会话中。");
     }
-  }, [bindings, bpm, notes, octave, showToast, slots, title, tonic]);
+  }, [showToast]);
 
   const markChanged = useCallback(() => setDirty(true), []);
 

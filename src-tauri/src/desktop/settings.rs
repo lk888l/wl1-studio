@@ -2,18 +2,30 @@ use pc_monitor_core::MonitorConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::portable;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseBehavior {
+    Exit,
+    #[default]
+    Tray,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct Preferences {
     pub start_in_background: bool,
     pub auto_resume: bool,
+    pub close_behavior: CloseBehavior,
 }
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            start_in_background: true,
+            start_in_background: false,
             auto_resume: true,
+            close_behavior: CloseBehavior::Tray,
         }
     }
 }
@@ -79,56 +91,168 @@ pub struct SettingsStore {
     pub path: Option<PathBuf>,
     pub saved: SavedSettings,
     pub warning: Option<String>,
+    pub blocked: bool,
+    loaded: bool,
+    dirty: bool,
+    legacy_path: Option<PathBuf>,
+    source: Option<PathBuf>,
 }
 
 impl SettingsStore {
+    #[cfg(test)]
     pub fn load(path: PathBuf) -> Self {
-        let loaded = match std::fs::read(&path) {
-            Ok(bytes) => SavedSettings::decode(&bytes),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(SavedSettings::default())
+        Self::load_migrating(path, None)
+    }
+
+    pub fn unavailable(warning: String) -> Self {
+        Self {
+            warning: Some(warning),
+            blocked: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn load_migrating(path: PathBuf, legacy_path: Option<PathBuf>) -> Self {
+        let mut source = path.clone();
+        let mut migrating = false;
+        let loaded = portable::read(&path, 16 * 1024).and_then(|bytes| {
+            if let Some(bytes) = bytes {
+                return SavedSettings::decode(&bytes);
             }
-            Err(error) => Err(format!("无法读取后台配置：{error}")),
-        };
-        match loaded {
+            if let Some(legacy) = &legacy_path {
+                source = legacy.clone();
+                if let Some(bytes) = portable::read(legacy, 16 * 1024)? {
+                    let saved = SavedSettings::decode(&bytes)?;
+                    migrating = true;
+                    return Ok(saved);
+                }
+            }
+            Ok(SavedSettings::default())
+        });
+        let mut store = match loaded {
             Ok(saved) => Self {
                 path: Some(path),
                 saved,
-                warning: None,
+                loaded: true,
+                legacy_path,
+                source: Some(source),
+                ..Self::default()
             },
             Err(warning) => Self {
                 path: Some(path),
                 warning: Some(warning),
+                blocked: true,
+                legacy_path,
+                source: Some(source),
                 ..Self::default()
             },
+        };
+        if migrating {
+            let _ = store.save();
         }
+        store
     }
 
     pub fn save(&mut self) -> Result<(), String> {
+        self.dirty = true;
         let result = self.write();
         self.warning = result.as_ref().err().cloned();
+        self.blocked = !self.loaded;
+        if result.is_ok() {
+            self.dirty = false;
+            self.source = self.path.clone();
+        }
         result
     }
 
     fn write(&self) -> Result<(), String> {
+        if !self.loaded {
+            return Err(self
+                .warning
+                .clone()
+                .unwrap_or_else(|| "后台配置尚未成功读取，已阻止覆盖".into()));
+        }
         let path = self
             .path
             .as_ref()
             .ok_or("无法取得后台配置目录；设置仅在本次运行有效")?;
-        let parent = path.parent().ok_or("后台配置路径无效")?;
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("无法创建后台配置目录：{error}"))?;
         let bytes = serde_json::to_vec_pretty(&self.saved).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.tmp");
-        std::fs::write(&temporary, bytes)
-            .and_then(|()| std::fs::rename(&temporary, path))
-            .map_err(|error| format!("后台设置保存失败，仅在本次运行有效：{error}"))
+        portable::atomic_write(path, &bytes)
+    }
+
+    pub fn retry(&mut self) -> Result<(), String> {
+        if self.loaded && self.dirty {
+            return self.save();
+        }
+        let path = self.path.clone().ok_or("无法取得便携配置目录")?;
+        *self = Self::load_migrating(path, self.legacy_path.clone());
+        if self.blocked {
+            Err(self.warning.clone().unwrap_or_default())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn reset_corrupt(&mut self) -> Result<(), String> {
+        let path = self.path.clone().ok_or("无法取得便携配置目录")?;
+        let current = Self::load_migrating(path, self.legacy_path.clone());
+        if current.loaded {
+            if self.loaded && self.dirty {
+                return self.save();
+            }
+            *self = current;
+            return if self.blocked {
+                Err(self.warning.clone().unwrap_or_default())
+            } else {
+                Ok(())
+            };
+        }
+        portable::backup_file(current.source.as_deref().ok_or("找不到损坏配置路径")?)?;
+        self.saved = SavedSettings::default();
+        self.loaded = true;
+        self.save()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_defaults_to_tray_and_survives_serialization() {
+        let legacy = SavedSettings::decode(br#"{"preferences":{"autoResume":false}}"#).unwrap();
+        assert_eq!(legacy.preferences.close_behavior, CloseBehavior::Tray);
+        let mut saved = legacy;
+        saved.preferences.close_behavior = CloseBehavior::Exit;
+        let decoded = SavedSettings::decode(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(decoded.preferences.close_behavior, CloseBehavior::Exit);
+        assert!(SavedSettings::decode(br#"{"preferences":{"closeBehavior":"unknown"}}"#).is_err());
+    }
+
+    #[test]
+    fn migration_never_overwrites_local_or_deletes_the_legacy_configuration() {
+        let root = portable::test_directory("background-migration");
+        let legacy = root.join("old/background-v1.json");
+        let local = root.join(".local/background-v1.json");
+        let mut saved = configured();
+        saved.preferences.close_behavior = CloseBehavior::Exit;
+        let bytes = serde_json::to_vec(&saved).unwrap();
+        portable::atomic_write(&legacy, &bytes).unwrap();
+        let store = SettingsStore::load_migrating(local.clone(), Some(legacy.clone()));
+        assert!(!store.blocked);
+        assert_eq!(store.saved.preferences.close_behavior, CloseBehavior::Exit);
+        assert_eq!(std::fs::read(&legacy).unwrap(), bytes);
+        portable::atomic_write(&local, b"{").unwrap();
+        let mut broken = SettingsStore::load_migrating(local.clone(), Some(legacy.clone()));
+        assert!(broken.blocked);
+        assert!(broken.save().is_err());
+        assert_eq!(std::fs::read(&local).unwrap(), b"{");
+        broken.reset_corrupt().unwrap();
+        assert!(!broken.blocked);
+        assert_eq!(broken.saved.preferences.close_behavior, CloseBehavior::Tray);
+        assert_eq!(std::fs::read(legacy).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn configured() -> SavedSettings {
         SavedSettings {
@@ -147,7 +271,7 @@ mod tests {
     fn first_launch_and_unreachable_tray_always_show_setup() {
         assert!(SavedSettings::default().should_show_window(true, false, true, false));
         let saved = configured();
-        assert!(!saved.should_show_window(true, false, false, false));
+        assert!(saved.should_show_window(true, false, false, false));
         assert!(saved.should_show_window(false, false, true, false));
         assert!(saved.should_show_window(true, true, true, false));
         assert!(saved.should_show_window(true, false, true, true));
@@ -162,6 +286,9 @@ mod tests {
         saved.monitor_enabled = true;
         saved.preferences.auto_resume = false;
         assert!(saved.resume_config().is_none());
+        saved.preferences.start_in_background = true;
+        assert!(!saved.should_show_window(true, false, false, false));
+        assert!(saved.should_show_window(true, true, false, false));
         saved.preferences.start_in_background = false;
         assert!(saved.should_show_window(true, false, false, false));
         assert!(!saved.should_show_window(true, false, true, false));

@@ -1,5 +1,6 @@
 import { parameterDefinitions } from "../data/parameters";
 import type { ParameterProfile, ParameterValues, PersonalizationSettings } from "../types";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "./user-storage";
 
 const PROFILE_KEY = "wl1-studio.parameter-profiles.v1";
 const PERSONALIZATION_KEY = "wl1-studio.personalization.v1";
@@ -76,37 +77,28 @@ export function sanitizePersonalization(value: unknown): PersonalizationSettings
 
 export function loadProfiles(): ParameterProfile[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(PROFILE_KEY) ?? "[]");
+    const parsed = JSON.parse(getStoredItem(PROFILE_KEY) ?? "[]");
     return sanitizeProfiles(parsed);
   } catch {
     return [];
   }
 }
 
-export function saveProfiles(profiles: ParameterProfile[]): boolean {
-  try {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profiles));
-    return true;
-  } catch {
-    // Settings remain usable in memory when storage is unavailable or full.
-    return false;
-  }
+export function saveProfiles(profiles: ParameterProfile[]): Promise<boolean> {
+  return setStoredItem(PROFILE_KEY, JSON.stringify(sanitizeProfiles(profiles)));
 }
 
 export function loadPersonalization(): PersonalizationSettings {
   try {
-    return sanitizePersonalization(JSON.parse(localStorage.getItem(PERSONALIZATION_KEY) ?? "{}"));
+    return sanitizePersonalization(JSON.parse(getStoredItem(PERSONALIZATION_KEY) ?? "{}"));
   } catch {
     return defaultPersonalization;
   }
 }
 
-export function savePersonalization(settings: PersonalizationSettings): boolean {
-  try {
-    localStorage.setItem(PERSONALIZATION_KEY, JSON.stringify(settings));
-    return true;
-  } catch {
-    // Keep the live UI state even if persistence is unavailable.
-    return false;
-  }
+export function savePersonalization(settings: PersonalizationSettings): Promise<boolean> {
+  return setStoredItem(PERSONALIZATION_KEY, JSON.stringify(sanitizePersonalization(settings)));
 }
+
+registerStorageValidator(PROFILE_KEY, sanitizeProfiles);
+registerStorageValidator(PERSONALIZATION_KEY, sanitizePersonalization);

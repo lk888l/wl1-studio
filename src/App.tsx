@@ -164,7 +164,11 @@ export default function App() {
   const [catalogSafetyAttempt, setCatalogSafetyAttempt] = useState(0);
 
   useEffect(() => {
-    setPersonalizationPersisted(savePersonalization(personalization));
+    let cancelled = false;
+    void savePersonalization(personalization).then((saved) => {
+      if (!cancelled) setPersonalizationPersisted(saved);
+    });
+    return () => { cancelled = true; };
   }, [personalization]);
 
   const updatePersonalization = useCallback((next: PersonalizationSettings): void => {
@@ -638,18 +642,19 @@ function Wl1Studio({ onBack, personalization }: Wl1StudioProps) {
     };
     const next = [...profiles, profile];
     setProfiles(next);
-    const persisted = saveProfiles(next.filter((item) => !item.builtIn));
-    setParameterNotice(persisted
-      ? `档案“${name}”已保存在本机。`
-      : `档案“${name}”仅保留在当前会话：本机存储写入失败。`);
+    void saveProfiles(next.filter((item) => !item.builtIn)).then((persisted) => {
+      setParameterNotice(persisted
+        ? `档案“${name}”已保存在本机。`
+        : `档案“${name}”仅保留在当前会话：本机存储写入失败。`);
+    });
   }, [draftParameters, profiles]);
 
   const deleteProfile = useCallback((id: string): void => {
     const next = profiles.filter((item) => item.id !== id);
     setProfiles(next);
-    if (!saveProfiles(next.filter((item) => !item.builtIn))) {
-      setParameterNotice("档案已从当前列表移除，但本机存储更新失败；刷新后可能重新出现。");
-    }
+    void saveProfiles(next.filter((item) => !item.builtIn)).then((persisted) => {
+      if (!persisted) setParameterNotice("档案已从当前列表移除，但本机存储更新失败；刷新后可能重新出现。");
+    });
   }, [profiles]);
 
   const setTelemetry = useCallback(async (enabled: boolean): Promise<void> => {

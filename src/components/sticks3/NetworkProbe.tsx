@@ -4,10 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { isTauriRuntime } from "../../lib/device";
 import { ipv4Error, openOcdConfig, sticks3Network, type DapProtocol, type NetworkDevice, type NetworkProbe as ProbeInfo } from "../../lib/sticks3-network";
 import type { S3Run } from "./RadioConnections";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "../../lib/user-storage";
 
 export const networkHostKey = "studio.sticks3.network-host.v1";
+registerStorageValidator(networkHostKey, (value) => {
+  if (typeof value !== "string" || ipv4Error(value)) throw new Error("网络地址偏好无效");
+  return value.trim();
+});
 export function preferredNetworkHost(): string {
-  try { const value = localStorage.getItem(networkHostKey) ?? ""; return ipv4Error(value) ? "" : value; } catch { return ""; }
+  try { const value = getStoredItem(networkHostKey) ?? ""; return ipv4Error(value) ? "" : value; } catch { return ""; }
 }
 
 interface Props { host: string; onHost: (host: string) => void; busy: boolean; run: S3Run; onSetup: () => void; onUse: (probe: ProbeInfo, protocol: DapProtocol) => void }
@@ -34,7 +39,7 @@ export function NetworkProbe({ host, onHost, busy, run, onSetup, onUse }: Props)
       setProbe(result); setProtocol(result.swd ? "swd" : "jtag");
       found = result;
       setCheckedAt(new Date().toLocaleTimeString());
-      try { localStorage.setItem(networkHostKey, result.host); } catch { /* Optional preference. */ }
+      await setStoredItem(networkHostKey, result.host);
     }).then((ok) => { if (ok && found) onUse(found, found.swd ? "swd" : "jtag"); });
   };
   const discover = () => {

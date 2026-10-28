@@ -1,6 +1,10 @@
-import { Check, LayoutDashboard, Palette, RotateCcw, Sparkles, WandSparkles } from "lucide-react";
+import { Check, Folder, LayoutDashboard, Monitor, Palette, RotateCcw, Sparkles, WandSparkles } from "lucide-react";
+import { useRef, useState } from "react";
 
+import { isTauriRuntime } from "../../lib/device";
+import { pcMonitorGateway, usePcMonitor, type DesktopPreferences } from "../../lib/pc-monitor";
 import { defaultPersonalization } from "../../lib/storage";
+import { useUserStorageStatus } from "../../lib/user-storage";
 import type { PersonalizationSettings } from "../../types";
 import { LiquidGlass } from "../LiquidGlass";
 
@@ -18,18 +22,49 @@ const accents: Array<{ id: PersonalizationSettings["accent"]; label: string; col
 ];
 
 export function PersonalizationPage({ settings, persisted, onChange }: PersonalizationPageProps) {
+  const snapshot = usePcMonitor();
+  const storage = useUserStorageStatus();
+  const [savingClose, setSavingClose] = useState(false);
+  const [closeError, setCloseError] = useState("");
+  const saving = useRef(false);
+  const desktop = snapshot.desktop;
+  const tauri = isTauriRuntime();
   const update = <Key extends keyof PersonalizationSettings>(key: Key, value: PersonalizationSettings[Key]): void => {
     onChange({ ...settings, [key]: value });
   };
+  async function updateCloseBehavior(closeBehavior: DesktopPreferences["closeBehavior"]): Promise<void> {
+    if (!desktop || saving.current) return;
+    saving.current = true; setSavingClose(true); setCloseError("");
+    try { await pcMonitorGateway.savePreferences({ ...desktop.preferences, closeBehavior }); }
+    catch (reason) {
+      setCloseError(reason instanceof Error ? reason.message : String(reason));
+      await pcMonitorGateway.refresh().catch(() => undefined);
+    } finally { saving.current = false; setSavingClose(false); }
+  }
+  const fullySaved = persisted && !storage.saving && !storage.warning && !savingClose && !closeError;
 
   return (
     <div className="page-stack personalization-page">
       <section className="page-heading">
         <div><h1>个性设置</h1><p>统一设置首页与各产品工作台的界面偏好，配置自动保存在本机。</p></div>
-        <button className="secondary-button" type="button" onClick={() => onChange(defaultPersonalization)}><RotateCcw size={16} />恢复默认</button>
+        <button className="secondary-button" type="button" disabled={savingClose || (tauri && !desktop)} onClick={() => {
+          onChange(defaultPersonalization);
+          if (desktop && desktop.preferences.closeBehavior !== "tray") void updateCloseBehavior("tray");
+        }}><RotateCcw size={16} />恢复默认</button>
       </section>
 
       <div className="personalization-grid">
+        <LiquidGlass as="section" variant="panel" className="settings-card glass-card desktop-settings-card">
+          <div className="settings-card__head"><span className="settings-icon"><Monitor size={21} /></span><div><small>APPLICATION</small><h2>窗口与本地配置</h2></div></div>
+          <fieldset className="radio-stack" disabled={!tauri || !desktop || savingClose}><legend>关闭窗口时</legend>
+            <label><input type="radio" name="close-behavior" checked={(desktop?.preferences.closeBehavior ?? "tray") === "tray"} disabled={desktop?.trayAvailable === false} onChange={() => { void updateCloseBehavior("tray"); }} /><span><strong>最小化到托盘</strong><small>释放界面和其他产品连接，保留电脑监控；从托盘恢复。</small></span></label>
+            <label><input type="radio" name="close-behavior" checked={desktop?.preferences.closeBehavior === "exit"} onChange={() => { void updateCloseBehavior("exit"); }} /><span><strong>全部退出</strong><small>结束界面、托盘和后台采集与传输。</small></span></label>
+          </fieldset>
+          <p className="desktop-settings-note">{!tauri ? "窗口关闭设置需要桌面应用；浏览器预览使用浏览器存储。" : !desktop ? "正在读取窗口设置…" : !desktop.trayAvailable ? "系统托盘不可用，关闭窗口会完整退出。" : savingClose ? "正在保存关闭选择…" : "选择自动记忆，重启后仍然生效。轻量后台按钮和托盘退出入口始终可用。"}</p>
+          <div className="storage-directory"><Folder size={16} /><div><strong>{tauri ? "配置目录" : "浏览器本地存储"}</strong>{storage.directory && <code>{storage.directory}</code>}<small>{tauri ? "复制程序时同时复制 .local 文件夹，即可携带全部已保存配置与工程。" : "浏览器预览不读写程序旁的文件。"}</small></div></div>
+          {(closeError || snapshot.lastError || desktop?.warning || storage.warning) && <p className="desktop-settings-error" role="alert">{closeError || snapshot.lastError || desktop?.warning || storage.warning}</p>}
+        </LiquidGlass>
+
         <LiquidGlass as="section" variant="panel" className="settings-card glass-card">
           <div className="settings-card__head"><span className="settings-icon"><WandSparkles size={21} /></span><div><small>IDENTITY</small><h2>WL1 机器人身份</h2></div><span className="local-only">仅本机</span></div>
           <label className="form-field"><span>显示名称</span><input value={settings.robotName} maxLength={28} onChange={(event) => update("robotName", event.target.value)} /></label>
@@ -73,7 +108,7 @@ export function PersonalizationPage({ settings, persisted, onChange }: Personali
         </LiquidGlass>
       </div>
 
-      <LiquidGlass as="section" variant="panel" className="settings-footer glass-card"><Sparkles size={19} /><div><strong>{persisted ? "设置会即时生效并自动保存" : "设置已生效，但本机存储写入失败"}</strong><p>主题与动态效果应用于整个软件；机器人名称、灯光预览和工作台偏好用于 WL1，配置仅在本机生效。</p></div><span className={`soft-badge${persisted ? " is-success" : ""}`}>{persisted ? "已保存到本机" : "仅当前会话"}</span></LiquidGlass>
+      <LiquidGlass as="section" variant="panel" className="settings-footer glass-card"><Sparkles size={19} /><div><strong>{storage.saving || savingClose ? "正在保存设置…" : fullySaved ? "设置会即时生效并自动保存" : "设置已生效，部分修改尚未保存"}</strong><p>主题与动态效果应用于整个软件；机器人名称、灯光预览和工作台偏好用于 WL1。</p></div><span className={`soft-badge${fullySaved ? " is-success" : ""}`}>{storage.saving || savingClose ? "保存中" : fullySaved ? "已保存到本机" : "仅当前会话"}</span></LiquidGlass>
     </div>
   );
 }

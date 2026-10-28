@@ -1,4 +1,5 @@
 import type { ConnectionChoice, SerialPortOption } from "../types";
+import { getStoredItem, registerStorageValidator, setStoredItem } from "./user-storage";
 
 const CONNECTION_KEY = "wl1-studio.connection.v1";
 
@@ -25,19 +26,17 @@ export function sanitizeConnectionPreferences(value: unknown): ConnectionPrefere
 
 export function loadConnectionPreferences(): ConnectionPreferences {
   try {
-    return sanitizeConnectionPreferences(JSON.parse(localStorage.getItem(CONNECTION_KEY) ?? "{}"));
+    return sanitizeConnectionPreferences(JSON.parse(getStoredItem(CONNECTION_KEY) ?? "{}"));
   } catch {
     return sanitizeConnectionPreferences(null);
   }
 }
 
-export function saveConnectionPreferences(preferences: ConnectionPreferences): void {
-  try {
-    localStorage.setItem(CONNECTION_KEY, JSON.stringify(preferences));
-  } catch {
-    // Connection remains available when browser storage is disabled or full.
-  }
+export function saveConnectionPreferences(preferences: ConnectionPreferences): Promise<boolean> {
+  return setStoredItem(CONNECTION_KEY, JSON.stringify(sanitizeConnectionPreferences(preferences)));
 }
+
+registerStorageValidator(CONNECTION_KEY, sanitizeConnectionPreferences);
 
 /** Select a known port or the sole available port; ambiguous lists require a choice. */
 export function selectAvailablePort(

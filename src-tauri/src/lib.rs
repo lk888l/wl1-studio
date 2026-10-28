@@ -75,6 +75,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop::desktop_enter_background,
             desktop::desktop_save_preferences,
+            desktop::storage_api::user_config_status,
+            desktop::storage_api::user_config_get,
+            desktop::storage_api::user_config_set,
+            desktop::storage_api::user_config_import,
+            desktop::storage_api::user_config_retry,
+            desktop::storage_api::user_config_reset,
+            desktop::storage_api::user_config_flush,
+            desktop::lifecycle::desktop_ui_ready,
+            desktop::lifecycle::desktop_complete_close,
+            desktop::lifecycle::desktop_cancel_close,
             pc_monitor::pc_monitor_start,
             pc_monitor::pc_monitor_stop,
             pc_monitor::pc_monitor_snapshot,
@@ -122,11 +132,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("WL1 Studio 初始化失败")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
-                if code.is_none()
-                    && desktop::is_ui_worker()
-                    && !app.state::<desktop::DesktopState>().tray_available()
-                {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if desktop::is_ui_worker() && !desktop::lifecycle::exit_authorized(app) {
                     api.prevent_exit();
                     desktop::request_quit(app);
                     return;
@@ -148,7 +155,10 @@ pub fn run() {
                     } => {
                         api.prevent_close();
                     }
-                    tauri::RunEvent::ExitRequested { api, .. } => api.prevent_exit(),
+                    tauri::RunEvent::ExitRequested { api, .. } => {
+                        desktop::lifecycle::authorize_exit(app, false);
+                        api.prevent_exit();
+                    }
                     _ => {}
                 }
                 return;
@@ -159,27 +169,25 @@ pub fn run() {
                     return;
                 }
             }
-            if app.state::<desktop::DesktopState>().tray_available() {
-                match &event {
-                    tauri::RunEvent::WindowEvent {
-                        label,
-                        event: tauri::WindowEvent::CloseRequested { api, .. },
-                        ..
-                    } if label == "main" => {
-                        api.prevent_close();
-                        desktop::request_background(app);
-                        return;
-                    }
-                    // Destruction of the last WebView must keep the native
-                    // tray and sender alive. Explicit Quit uses Some(code).
-                    tauri::RunEvent::ExitRequested {
-                        code: None, api, ..
-                    } => {
-                        api.prevent_exit();
-                        return;
-                    }
-                    _ => {}
+            match &event {
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
+                    ..
+                } if label == "main" => {
+                    api.prevent_close();
+                    desktop::request_close(app);
+                    return;
                 }
+                // Destruction of the last WebView must keep the native
+                // tray and sender alive. Explicit Quit uses Some(code).
+                tauri::RunEvent::ExitRequested {
+                    code: None, api, ..
+                } if app.state::<desktop::DesktopState>().tray_available() => {
+                    api.prevent_exit();
+                    return;
+                }
+                _ => {}
             }
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Reopen { .. }) {
