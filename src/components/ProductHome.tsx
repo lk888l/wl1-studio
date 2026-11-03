@@ -34,7 +34,7 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | null;
+  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | "knob" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
@@ -45,6 +45,7 @@ interface ProductHomeProps {
   onOpenNfc: () => void;
   onOpenStickS3: () => void;
   onOpenPet: () => void;
+  onOpenKnob: () => void;
 }
 
 export function ProductHome({
@@ -62,6 +63,7 @@ export function ProductHome({
   onOpenNfc,
   onOpenStickS3,
   onOpenPet,
+  onOpenKnob,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -136,10 +138,16 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>5 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
+            <span>6 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
           </div>
 
           <div className="product-catalog__layout">
+            <LiquidGlass as="button" variant="panel" className={`product-card glass-card liquid-card is-${safetyState}${launching === "knob" ? " is-launching" : ""}`} type="button" disabled={safetyState !== "ready" || Boolean(launching)} onClick={onOpenKnob}>
+              <span className="product-card__visual" aria-hidden="true"><span className="product-card__model">ESP32-S3 · HAPTIC CONTROL</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true"><ellipse cx="260" cy="259" rx="112" ry="15" fill="#264d4b" opacity=".12" /><circle cx="260" cy="150" r="112" fill="#d4e2df" stroke="#fff" strokeWidth="3" /><circle cx="260" cy="150" r="93" fill="#273e47" /><circle cx="260" cy="150" r="83" fill="none" stroke="#4c666e" /><path d="M260 74v18" stroke="#9ce8d4" strokeWidth="6" strokeLinecap="round" /><text x="260" y="169" textAnchor="middle" fill="#eef4f5" fontSize="46">12</text><text x="260" y="193" textAnchor="middle" fill="#a8c0cd" fontSize="10" letterSpacing="3">SMART KNOB</text></svg>
+              </span>
+              <span className="product-card__body"><span className="product-card__meta"><span className="product-available"><i />FOC 力反馈 · USB 实时调参</span></span><span className="product-card__title"><strong>智能旋钮</strong></span><span className="product-card__description">自由旋转、虚拟档位、行程端点与弹簧回中。调整手感，查看位置与电流跟踪。</span><span className="product-card__footer"><span>2804 · AS5600 · DRV8316CT</span><ArrowRight size={18} /></span></span>
+            </LiquidGlass>
             <LiquidGlass as="button" variant="panel"
               className={`product-card product-card--pet glass-card liquid-card is-${safetyState}${launching === "pet" ? " is-launching" : ""}`}
               type="button"

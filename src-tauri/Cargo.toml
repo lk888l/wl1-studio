@@ -51,3 +51,10 @@ strip = true
 members = ["crates/pc-monitor-core", "crates/pc-monitor-windows"]
 exclude = ["vendor/probe-rs"]
 resolver = "2"
+
+# Keep desktop builds small on the development machine.
+[profile.dev]
+incremental = false
+
+[profile.test]
+incremental = false

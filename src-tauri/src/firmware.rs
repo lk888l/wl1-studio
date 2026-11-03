@@ -380,7 +380,8 @@ pub(crate) fn reserve(app: &AppHandle) -> Result<JobGuard, String> {
     crate::desktop::ensure_foreground(app)?;
     app.state::<crate::sticks3_network::StickS3NetworkState>()
         .ensure_idle()?;
-    if app.state::<crate::state::AppState>().snapshot()?.mode != "disconnected"
+    if app.state::<crate::knob::KnobState>().snapshot()?.connected
+        || app.state::<crate::state::AppState>().snapshot()?.mode != "disconnected"
         || app.state::<crate::gamebox::GameBoxState>().snapshot()?.mode
             != crate::gamebox::GameBoxMode::Disconnected
         || app.state::<crate::nfc::NfcState>().snapshot()?.mode != crate::nfc::NfcMode::Disconnected

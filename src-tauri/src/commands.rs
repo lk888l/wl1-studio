@@ -105,6 +105,7 @@ fn connect_device_blocking(
     firmware.ensure_idle()?;
     match config.mode {
         ConnectionRequestMode::Mock => {
+            app.state::<crate::knob::KnobState>().disconnect(None)?;
             pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
@@ -125,6 +126,7 @@ fn connect_device_blocking(
                 .filter(|name| !name.is_empty())
                 .ok_or("请选择串口")?;
             ensure_serial_port_available(port_name)?;
+            app.state::<crate::knob::KnobState>().disconnect(None)?;
             pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
@@ -140,6 +142,7 @@ fn connect_device_blocking(
                 .as_deref()
                 .filter(|id| !id.is_empty())
                 .ok_or("请扫描并选择蓝牙设备")?;
+            app.state::<crate::knob::KnobState>().disconnect(None)?;
             pet.disconnect(None)?;
             sticks3.disconnect(None)?;
             gamebox.disconnect(None)?;
@@ -190,6 +193,7 @@ pub fn gamebox_connect(
     // Preserve the existing robot safety shutdown when switching products.
     // Its writes target only its previously owned WL1 port, never GameBox.
     state.disconnect(None)?;
+    app.state::<crate::knob::KnobState>().disconnect(None)?;
     app.state::<PetState>().disconnect(None)?;
     app.state::<StickS3State>().disconnect(None)?;
     app.state::<NfcState>().disconnect(None)?;
@@ -235,6 +239,7 @@ pub fn nfc_connect(
     // device being abandoned.
     state.disconnect(None)?;
     gamebox.disconnect(None)?;
+    app.state::<crate::knob::KnobState>().disconnect(None)?;
     app.state::<PetState>().disconnect(None)?;
     app.state::<StickS3State>().disconnect(None)?;
     nfc.connect(app, port_name)
@@ -253,6 +258,7 @@ pub async fn sticks3_connect(app: AppHandle, port_name: String) -> Result<StickS
         app.state::<AppState>().disconnect(None)?;
         app.state::<GameBoxState>().disconnect(None)?;
         app.state::<NfcState>().disconnect(None)?;
+        app.state::<crate::knob::KnobState>().disconnect(None)?;
         app.state::<PetState>().disconnect(None)?;
         app.state::<StickS3State>().connect(port_name)
     })
@@ -312,6 +318,7 @@ pub async fn pet_connect(app: AppHandle, port_name: String) -> Result<PetSnapsho
         app.state::<GameBoxState>().disconnect(None)?;
         app.state::<NfcState>().disconnect(None)?;
         app.state::<StickS3State>().disconnect(None)?;
+        app.state::<crate::knob::KnobState>().disconnect(None)?;
         app.state::<PetState>().connect(port_name)
     })
     .await

@@ -21,6 +21,8 @@ import { OverviewPage } from "./components/pages/OverviewPage";
 import { RobotFeaturesPanel } from "./components/pages/RobotFeaturesPanel";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
+import { KnobStudio } from "./components/knob/KnobStudio";
+import { knobGateway } from "./lib/knob";
 import { PetStudio } from "./components/pet/PetStudio";
 import { PcMonitorStatus } from "./components/pet/PcMonitorPanel";
 import { GameBoxStudio } from "./components/gamebox/GameBoxStudio";
@@ -141,7 +143,7 @@ function mergeKnownParameterValues(applied: Partial<ParameterValues>): Parameter
   return next;
 }
 
-type AppView = "products" | "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet";
+type AppView = "products" | "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | "knob";
 type ProductTransitionState = "idle" | "covering" | "revealing";
 type CatalogSafetyState = "checking" | "ready" | "error";
 
@@ -187,6 +189,7 @@ export default function App() {
       .then(() => nfcGateway.initialize())
       .then(() => sticks3Gateway.initialize())
       .then(() => petGateway.initialize())
+      .then(() => knobGateway.initialize())
       .then(() => {
         if (!cancelled) setCatalogSafety("ready");
       })
@@ -210,7 +213,7 @@ export default function App() {
           ? "GameBox Studio · 游戏机工作台"
           : view === "nfc"
             ? "NFC Studio · PN532 读卡器"
-            : view === "pet" ? "Pet Studio · ESP32-C3 桌宠工作台"
+            : view === "knob" ? "Knob Studio · 智能旋钮" : view === "pet" ? "Pet Studio · ESP32-C3 桌宠工作台"
               : view === "sticks3" ? "StickS3 Studio · 多功能设备工作台"
               : "KeyNest Studio · 口袋电子琴";
   }, [view]);
@@ -245,7 +248,7 @@ export default function App() {
     setProductTransition("covering");
   }, [catalogSafety, personalization.reducedMotion, productTransition]);
 
-  const launchLabel = launchTarget === "piano" ? "KeyNest Studio"
+  const launchLabel = launchTarget === "knob" ? "Knob Studio" : launchTarget === "piano" ? "KeyNest Studio"
     : launchTarget === "gamebox" ? "GameBox Studio"
       : launchTarget === "nfc" ? "NFC Studio" : launchTarget === "pet" ? "Pet Studio" : launchTarget === "sticks3" ? "StickS3 Studio" : "WL1 Studio";
 
@@ -273,9 +276,12 @@ export default function App() {
             onOpenNfc={() => openProduct("nfc")}
             onOpenStickS3={() => openProduct("sticks3")}
             onOpenPet={() => openProduct("pet")}
+            onOpenKnob={() => openProduct("knob")}
           />
         ) : view === "wl1" ? (
           <Wl1Studio personalization={personalization} onBack={() => setView("products")} />
+        ) : view === "knob" ? (
+          <KnobStudio onBack={() => setView("products")} />
         ) : view === "pet" ? (
           <PetStudio onBack={() => setView("products")} />
         ) : view === "gamebox" ? (

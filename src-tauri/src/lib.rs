@@ -9,6 +9,7 @@ mod firmware_image;
 mod firmware_target;
 mod firmware_usb;
 mod gamebox;
+mod knob;
 mod mifare;
 mod nfc;
 mod pc_monitor;
@@ -65,6 +66,7 @@ pub fn run() {
         .manage(bluetooth::BluetoothState::default())
         .manage(gamebox::GameBoxState::default())
         .manage(deskpet::PetState::default())
+        .manage(knob::KnobState::default())
         .manage(pc_monitor::PcMonitorState::default())
         .manage(nfc::NfcState::default())
         .manage(sticks3::StickS3State::default())
@@ -101,6 +103,9 @@ pub fn run() {
             firmware_usb::firmware_usb_support,
             firmware_usb::firmware_install_usb_support,
             commands::list_serial_ports,
+            knob::knob_connect,
+            knob::knob_disconnect,
+            knob::knob_request,
             commands::scan_bluetooth_devices,
             commands::connect_device,
             commands::disconnect_device,

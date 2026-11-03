@@ -189,6 +189,7 @@ fn report_error(app: &AppHandle, error: String) {
 /// Caller owns ProductSessionLifecycle. Attempt every release if one fails.
 pub fn disconnect_products(app: &AppHandle) -> Result<(), String> {
     let errors = [
+        app.state::<crate::knob::KnobState>().disconnect(None),
         app.state::<crate::state::AppState>().disconnect(None),
         app.state::<crate::gamebox::GameBoxState>().disconnect(None),
         app.state::<crate::nfc::NfcState>().disconnect(None),
