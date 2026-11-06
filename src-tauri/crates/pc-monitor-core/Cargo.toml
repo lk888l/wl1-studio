@@ -8,7 +8,7 @@ description = "Lightweight system sampling and UDP telemetry independent of Taur
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 nvml-wrapper = "0.13.0"
 mio = { version = "1", features = ["net", "os-poll"] }
 
