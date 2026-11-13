@@ -31,6 +31,10 @@ USB 设置本身不会连接/写入芯片，且与烧录、读取、擦除及串
 
 默认 SWD 为 1000 kHz。连接不稳定可降到 400/100 kHz。设备固件关闭调试引脚或普通连接失败时，可接上 NRST 再选择“复位下连接”。过旧的探针固件仍需通过 ST 官方工具维护，应用不更新探针自身固件。
 
+完整读取、擦除后的空白检查及独立文件校验按 16 KiB 更新进度，通过 probe-rs 的批量读取接口使用 32 位访问；驱动按探针上限拆包，避免 ST-Link V2 的 8 位读取每次只能传输 64 字节。烧录时，在扇区擦除成功后跳过内容全部为空白值的原始页，减少工厂固件空洞及空白保留区的无效写入；这些页仍参加完整回读校验。未覆盖数据中的非空白内容照常恢复，禁用擦除或使用编码算法时不跳页。默认频率保持 1000 kHz。
+
+F411 / 512 KiB 使用两个 16 KiB RAM 编程缓冲区，减少原先每 1 KiB 就配置核心寄存器并启动算法的往返。原始 `stm32f4xx_1024` 的 `ProgramPage` 按传入长度循环写 32 位字；16 KiB 对齐所有擦除扇区，双缓冲、算法和栈均在 F411CE 的 128 KiB RAM 内。逐页超时按缓冲容量同比例增加。优化只对已核对指令 SHA-256 的内置算法生效，其他算法、OTP、物理扇区、Flash 容量和芯片识别规则保持原配置；升级算法后哈希不符时回退原始缓冲设置。
+
 ## 三个独立操作
 
 ### 烧录 / 更新
@@ -74,6 +78,38 @@ SHA-256 与格式检查不是发布方签名认证，也不能证明固件适用
 
 自动化覆盖格式、容量/地址边界、ELF 物理地址、HEX 校验和/EOF、芯片身份、任务互斥、内置目标与算法、完整 512 KiB 数据最后一页和浏览器禁用路径。USB 测试覆盖确认门禁、内置驱动哈希与许可、PowerShell 路径转义/编码、取消与需要重启的结果；Windows CI 额外解析设置脚本并验证原版驱动签名。普通测试不会请求管理员权限、安装驱动、写入系统规则或连接硬件。
 
-发布前仍需实机验证 ST-Link V2/V3、STM32F411CEU、BIN/HEX/ELF、完整备份与外部读回比对、同扇区未覆盖字节保留、擦除全 FF、读保护拒绝、拔线报错、复位连接及空白 Windows/Linux 的 USB 支持。
+### 2026-11-13 Windows 实机性能验证
+
+设备为 ST-Link V2-1（V2J48M35）与 STM32F411CEU / 512 KiB。优化前后均使用 1000 kHz 设置，探针实际为 950 kHz；使用同一 Rust test 构建配置及桌面命令共用的 `execute_job` 后端。固件为用户提供的 `WL1_F411CEU6_factory.bin`，393,300 字节，SHA-256 为 `c426d116e28c7b222e71080e75d1ddae313e21ebf9c8cdca31d09835ddfdd876`。
+
+| 操作 | 优化前 | 优化后首轮 | 变化 |
+| --- | ---: | ---: | --- |
+| 完整读取 512 KiB（含连接、恢复状态和计算哈希） | 130.598 s | 8.430 s | 约 15.5 倍速度 |
+| 独立逐字节校验完整 512 KiB 备份 | 130.970 s | 8.423 s | 约 15.5 倍速度 |
+| 工厂固件烧录（含保留、擦除、写入、校验、复位） | 41.568 s | 24.409 s | 耗时降低约 41% |
+| 其中实际编程阶段（按状态变化计时） | 22.625 s | 5.425 s | 耗时降低约 76% |
+
+最终方案第二轮在发布构建并行时同样通过，完整读取 8.498 s、完整校验 8.499 s、烧录 28.250 s；结果见 `optimized-bulk-repeat/`。两轮均执行下面的完整回读、局部写入与错误检测。最终再由 OpenOCD 独立读取全部 512 KiB（`final-openocd.bin`）核对后复位运行。
+
+烧录未启用“内容相同就跳过擦写”，每轮实际执行涉及扇区的擦除。写后比较整个 512 KiB：文件范围与固件相符，其余字节与写前备份相符。另从同一固件抽取跨 `0x08004000` 边界的 9 字节做局部烧录，确认两个受影响扇区的其余非空白程序及其他全部 Flash 字节保持一致。未对齐首尾、跨读取块及 Flash 最后 5 字节校验通过；故意将 `0x0807FFFF` 的期望字节改错后，后端报告该地址不一致并释放任务锁。
+
+初始独立备份由 OpenOCD 读取，完整 Flash SHA-256 为 `137af7fb8e30c37dacd152294337c95f28b2541994d7ed472b7e0e87e825fd71`。本地备份和逐阶段计时保存在被 Git 忽略的 `captures/wl1-stlink-20261113/` 中，原版为 `baseline/`，最终方案首轮为 `optimized-bulk-1000/`。
+
+排查中曾出现两次烧后回读校验不一致，均按失败停止；独立复核时未发现持续的 Flash 内容差异，其中一次独立首次回读也有单字节差异、再次读取则恢复一致。没有通过忽略校验、自动重烧或屏蔽通信错误来处理。ST-Link 同时报告约 0.58 V，按该探针已知的电压误报情况继续实测；这些结果不代表已定位瞬时读回差异的硬件原因。
+
+复测入口如下。`WL1_STLINK_BASELINE` 必须是当前目标的独立完整 512 KiB 备份；默认只读取与校验，仅在显式设置 `WL1_STLINK_FLASH=1` 并指定固件后才会烧录和测试局部保留。
+
+```powershell
+$env:WL1_STLINK_PROBE = '0483:374b:01290141524300143638414B'
+$env:WL1_STLINK_BASELINE = 'D:\path\current-full-flash.bin'
+$env:WL1_STLINK_OUTPUT = 'D:\path\new-validation-directory'
+$env:WL1_STLINK_SPEED = '1000'
+# 执行实际烧录时额外设置：
+$env:WL1_STLINK_FIRMWARE = 'D:\path\WL1_F411CEU6_factory.bin'
+$env:WL1_STLINK_FLASH = '1'
+cargo test --manifest-path src-tauri/Cargo.toml --lib --locked wl1_stlink_performance_and_preservation -- --ignored --nocapture --test-threads=1
+```
+
+上述实测仅覆盖当前 Windows、ST-Link V2-1、F411CEU 和 BIN。ST-Link V3、其他实物目标、HEX/ELF 实机烧录、独立整片擦除后全 FF 校验、读保护拒绝、拔线报错、复位下连接及空白 Windows/Linux 的 USB 支持仍需单独验证。
 
 参考：[probe-rs 探针设置](https://probe.rs/docs/getting-started/probe-setup/)、[STSW-LINK009](https://www.st.com/en/development-tools/stsw-link009.html)。

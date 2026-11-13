@@ -23,6 +23,10 @@ use crate::firmware_image::{
 use crate::firmware_target::{self, ResolvedTarget};
 use crate::sticks3_network::NetworkDevice;
 
+// Let the probe use word-sized bulk reads; byte accesses force ST-Link V2
+// into 64-byte USB transactions. Keep chunks bounded for progress updates.
+const FLASH_READ_CHUNK_SIZE: usize = 16 * 1024;
+
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FirmwareStatus {
@@ -320,11 +324,12 @@ fn attach(config: &ProbeConfig) -> Result<(Session, ChipInfo), String> {
     } else {
         discover_target(probe, config.connect_under_reset)?
     };
+    let target = resolved.probe_target()?;
     // Default permissions deliberately prohibit automatic RDP unlock/mass erase.
     let mut session = if config.connect_under_reset {
-        probe.attach_under_reset(resolved.target, Permissions::default())
+        probe.attach_under_reset(target, Permissions::default())
     } else {
-        probe.attach(resolved.target, Permissions::default())
+        probe.attach(target, Permissions::default())
     }.map_err(|error| format!("{}。检查目标供电与所选 SWD/JTAG 接线；可降低频率或连接 NRST 后启用复位连接。读保护不会自动解除", detailed_error("无法连接芯片", error)))?;
     let mut core = session
         .core(0)
@@ -443,9 +448,9 @@ fn read_flash(
     core.halt(Duration::from_secs(2))
         .map_err(|error| detailed_error("无法暂停核心", error))?;
     let mut data = vec![0; size];
-    for (index, chunk) in data.chunks_mut(4096).enumerate() {
-        let offset = index * 4096;
-        core.read_8(FLASH_START + offset as u64, chunk)
+    for (index, chunk) in data.chunks_mut(FLASH_READ_CHUNK_SIZE).enumerate() {
+        let offset = index * FLASH_READ_CHUNK_SIZE;
+        core.read(FLASH_START + offset as u64, chunk)
             .map_err(|error| {
                 detailed_error(
                     &format!(
@@ -518,10 +523,10 @@ fn verify_image(
             .map_err(|error| detailed_error("无法访问核心", error))?;
         let mut completed = 0;
         for (address, data) in &image.chunks {
-            for (index, expected) in data.chunks(4096).enumerate() {
-                let address = address + (index * 4096) as u64;
+            for (index, expected) in data.chunks(FLASH_READ_CHUNK_SIZE).enumerate() {
+                let address = address + (index * FLASH_READ_CHUNK_SIZE) as u64;
                 let mut actual = vec![0; expected.len()];
-                core.read_8(address, &mut actual)
+                core.read(address, &mut actual)
                     .map_err(|error| detailed_error("回读校验失败", error))?;
                 if let Some(offset) = actual.iter().zip(expected).position(|(a, b)| a != b) {
                     return Err(format!(

@@ -1,6 +1,11 @@
 //! Register-based STM32 discovery. A device ID identifies a die family, not its
 //! package marking. Capacity selects an existing, compatible Flash algorithm.
-use crate::firmware_image::Chip;
+use crate::firmware_image::{sha256, Chip};
+use probe_rs::config::{Registry, Target};
+
+const F411_PROGRAM_PAGE_SIZE: u32 = 16 * 1024;
+const F411_ALGORITHM_SHA256: &str =
+    "c7fdcc093641822f8b2232a77e846907dea1959c262e411eb36b143103ec3752";
 
 #[derive(Clone, Debug)]
 pub struct ResolvedTarget {
@@ -22,6 +27,31 @@ impl ResolvedTarget {
             size_register: chip.size_register(),
             uid_register: chip.uid_register(),
         }
+    }
+
+    pub fn probe_target(&self) -> Result<Target, String> {
+        let mut target = Registry::from_builtin_families()
+            .get_target_by_name(self.target)
+            .map_err(|error| format!("无法加载内置芯片配置: {error}"))?;
+        if self.device_id == 0x431 && self.flash_size == 512 * 1024 {
+            for algorithm in &mut target.flash_algorithms {
+                // This pinned F4 ProgramPage loops over the supplied length in
+                // 32-bit words; 1 KiB is a host buffer size, not a hardware page.
+                // 16 KiB fits twice in F411CE RAM and divides every erase sector.
+                // Unknown/replaced algorithms retain their original settings.
+                if algorithm.name == "stm32f4xx_1024"
+                    && algorithm.flash_properties.page_size == 1024
+                    && sha256(&algorithm.instructions) == F411_ALGORITHM_SHA256
+                {
+                    algorithm.flash_properties.program_page_timeout = algorithm
+                        .flash_properties
+                        .program_page_timeout
+                        .saturating_mul(F411_PROGRAM_PAGE_SIZE / 1024);
+                    algorithm.flash_properties.page_size = F411_PROGRAM_PAGE_SIZE;
+                }
+            }
+        }
+        Ok(target)
     }
 }
 
@@ -64,7 +94,83 @@ pub fn resolve(device_id: u32, size_kib: u16) -> Result<ResolvedTarget, String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use probe_rs::config::{MemoryRegion, Registry};
+    use probe_rs::config::MemoryRegion;
+    use probe_rs::flashing::FlashAlgorithm;
+
+    #[test]
+    fn f411_bulk_buffers_fit_ram_and_preserve_flash_layout() {
+        let resolved = ResolvedTarget::fixed(Chip::Stm32f411ceu);
+        let target = resolved.probe_target().unwrap();
+        let builtin = Registry::from_builtin_families()
+            .get_target_by_name(resolved.target)
+            .unwrap();
+        assert_eq!(target.memory_map, builtin.memory_map);
+        for (algorithm, original) in target
+            .flash_algorithms
+            .iter()
+            .zip(&builtin.flash_algorithms)
+        {
+            if algorithm.name != "stm32f4xx_1024" {
+                assert_eq!(
+                    algorithm, original,
+                    "OTP and other algorithms must be unchanged"
+                );
+                continue;
+            }
+            assert_eq!(algorithm.flash_properties.page_size, 16 * 1024);
+            assert_eq!(algorithm.flash_properties.program_page_timeout, 1600);
+            let mut restored = algorithm.clone();
+            restored.flash_properties.page_size = original.flash_properties.page_size;
+            restored.flash_properties.program_page_timeout =
+                original.flash_properties.program_page_timeout;
+            assert_eq!(
+                restored, *original,
+                "code, sectors and addresses must be unchanged"
+            );
+            let assembled = FlashAlgorithm::assemble_from_raw_with_core(
+                algorithm,
+                &target.cores[0].name,
+                &target,
+            )
+            .unwrap();
+            assert_eq!(assembled.page_buffers.len(), 2);
+            for address in &assembled.page_buffers {
+                assert!(target.memory_map.iter().any(|region| matches!(
+                    region,
+                    MemoryRegion::Ram(ram) if *address >= ram.range.start
+                        && address + u64::from(F411_PROGRAM_PAGE_SIZE) <= ram.range.end
+                )));
+            }
+            for sector in assembled.iter_sectors() {
+                assert_eq!(sector.base_address % u64::from(F411_PROGRAM_PAGE_SIZE), 0);
+                assert_eq!(sector.size % u64::from(F411_PROGRAM_PAGE_SIZE), 0);
+            }
+            let final_page = assembled.page_info(0x0807_ffff).unwrap();
+            assert_eq!(
+                final_page.base_address + u64::from(final_page.size),
+                0x0808_0000
+            );
+        }
+    }
+
+    #[test]
+    fn other_capacities_and_families_keep_the_builtin_algorithms() {
+        let registry = Registry::from_builtin_families();
+        for (id, size) in [
+            (0x410, 64),
+            (0x410, 128),
+            (0x431, 256),
+            (0x468, 32),
+            (0x468, 64),
+            (0x468, 128),
+        ] {
+            let resolved = resolve(id, size).unwrap();
+            let target = resolved.probe_target().unwrap();
+            let builtin = registry.get_target_by_name(resolved.target).unwrap();
+            assert_eq!(target.memory_map, builtin.memory_map);
+            assert_eq!(target.flash_algorithms, builtin.flash_algorithms);
+        }
+    }
 
     #[test]
     fn f1_reported_capacity_selects_the_algorithm_without_guessing_package() {

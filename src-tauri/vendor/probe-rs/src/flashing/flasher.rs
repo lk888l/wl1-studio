@@ -410,7 +410,16 @@ impl Flasher {
         }
 
         // Flash all necessary pages.
-        self.do_program(session, progress, enable_double_buffering)?;
+        // Only raw pages in sectors erased by this operation can be omitted.
+        // Keep their layout entries for the full read-back verification below.
+        let skip_erased_pages =
+            !skip_erasing && self.flash_algorithm.transfer_encoding == TransferEncoding::Raw;
+        self.do_program(
+            session,
+            progress,
+            enable_double_buffering,
+            skip_erased_pages,
+        )?;
 
         if verify && !self.verify(session, progress, !restore_unwritten_bytes)? {
             return Err(FlashError::Verify);
@@ -661,12 +670,13 @@ impl Flasher {
         session: &mut Session,
         progress: &mut FlashProgress<'_>,
         enable_double_buffering: bool,
+        skip_erased_pages: bool,
     ) -> Result<(), FlashError> {
         progress.started_programming();
         let program_result = if self.double_buffering_supported() && enable_double_buffering {
-            self.program_double_buffer(session, progress)
+            self.program_double_buffer(session, progress, skip_erased_pages)
         } else {
-            self.program_simple(session, progress)
+            self.program_simple(session, progress, skip_erased_pages)
         };
 
         match program_result.is_ok() {
@@ -682,6 +692,7 @@ impl Flasher {
         &mut self,
         session: &mut Session,
         progress: &mut FlashProgress<'_>,
+        skip_erased_pages: bool,
     ) -> Result<(), FlashError> {
         let encoding = self.flash_algorithm.transfer_encoding;
         self.run_program(session, progress, |active, data| {
@@ -693,6 +704,9 @@ impl Flasher {
                 );
                 let flash_encoder = region.data.encoder(encoding, false);
                 for page in flash_encoder.pages() {
+                    if active.skip_erased_page(page, skip_erased_pages) {
+                        continue;
+                    }
                     active
                         .program_page(page)
                         .map_err(|error| FlashError::PageWrite {
@@ -718,6 +732,7 @@ impl Flasher {
         &mut self,
         session: &mut Session,
         progress: &mut FlashProgress<'_>,
+        skip_erased_pages: bool,
     ) -> Result<(), FlashError> {
         let encoding = self.flash_algorithm.transfer_encoding;
         self.run_program(session, progress, |active, data| {
@@ -733,6 +748,9 @@ impl Flasher {
                 let mut t = Instant::now();
                 let mut last_page_address = 0;
                 for page in flash_encoder.pages() {
+                    if active.skip_erased_page(page, skip_erased_pages) {
+                        continue;
+                    }
                     // At the start of each loop cycle load the next page buffer into RAM.
                     let buffer_address = active.load_page_buffer(page.data(), current_buf)?;
 
@@ -1398,6 +1416,18 @@ impl ActiveFlasher<'_, '_, Erase> {
 }
 
 impl ActiveFlasher<'_, '_, Program> {
+    /// Account for an already-erased page without uploading or programming it.
+    /// Filled bytes are included, so nonblank preserved data is still written.
+    fn skip_erased_page(&mut self, page: &FlashPage, enabled: bool) -> bool {
+        if enabled && self.flash_algorithm.is_erased(page.data()) {
+            self.progress
+                .page_programmed(page.size() as u64, Duration::ZERO);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Runs the [`ProgramPage`] function.
     ///
     /// [`ProgramPage`]: https://open-cmsis-pack.github.io/Open-CMSIS-Pack-Spec/main/html/algorithmFunc.html#ProgramPage
