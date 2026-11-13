@@ -31,6 +31,38 @@ WL1 现支持 **ZX-D30 单模 BLE 扫描连接与遥控**。选择蓝牙设备�
 
 “存储与检查”保留本地 `.bin` 大小、CRC-32、初始栈指针和复位向量检查，该检查不直接烧录。后续外置 SPI Flash 将用于保存多个固件包，串口传输与 bootloader 均属规划；普通 SPI NOR 不能让 F103 直接执行更大的单个固件，bootloader 还会占用内部 Flash。协议、源码基线、容量边界和实机验证项见 [GameBox 接入指南](docs/gamebox-integration.md)。
 
+## ESP32-S3 智能力反馈旋钮
+
+从产品库进入 **智能旋钮** 工作台，通过原生 USB 连接 ESP32-S3 / DRV8316CT / MT6701 / 22008 电机。点击“一键连接并启动”即可读取配置、按需校准并启动力反馈；已有效的校准直接复用，新完成的校准会在停机状态保存一次后继续启动。“仅连接”始终只读取状态，设备已在运行时保持运行。
+
+当前配套固件为 **`dma-v23-live-tuning`**，以可选能力 `live_haptics_config:true` 开放运行中调参。选择模式立即切换，数字输入按 Enter 或失焦后自动应用，连续调节合并为 150 ms 防抖请求。模式 0–3、独立参考模式 4–15 和无摩擦模式 16 均可在运行中调节手感；同模式改档距和行程保留逻辑档位，以当前角度重建中心，超出新行程时就近限制。恢复当前模式默认参数也会自动应用。旧固件继续按其能力使用，旧参考参数仍需要停机。
+
+日常调参只更新 RAM，断电保留时停机并点击“保存到设备 NVS”。母线配置、采样增益、电流环 Kp/Ki 位于独立高级设置，必须停机应用。参考条目分次提交，每帧最多一个模式；请求正文限制为 1900 个 UTF-8 字节，未修改的无摩擦参数不重复发送。20 ms 配置过渡、触觉算法、电流环、限流和保护均由固件执行；普通触觉不增加持续滤波，上电仍等待用户启动。
+
+2026-11-13 v23 验证通过：前端 372 项、Rust 193 项、固件 CTest 29 项和 Python 53 项，以及前端、桌面 Release 和 ESP-IDF 构建。最终 Release 在真实 COM7 完成 17 模式在线切换和调参，118 份运行期回复保持 active / fault:none；结束恢复原配置、保留原校准，NVS 回读逐字节一致，设备停机。完整范围、自动校准模拟验证及证据见 [v23 接入记录](docs/smartknob-integration.md#2026-11-13-v23-在线调参与一键启动)。
+
+保留 `dma-v20-15k-sampling` 的小数频率兼容：该历史构建为 **15003.75 Hz PWM / 3750.94 Hz 电流控制 / 2500.63 Hz 编码器**、控制与编码器每 4 / 6 个载波周期更新、78.36% 电压利用率；当前参考模式构建为 20 kHz PWM / 5 kHz 控制。所有频率和电压能力仍取设备实际报告，不通过相同的 v20 版本前缀推断。
+
+电压能力随实时母线自动变化，界面只读；向新固件应用参数或切换模式不会发送旧 `voltage_limit`。旧固件的整数频率和既有电压限制仍兼容。已修复旧解析器要求 `control_nominal_hz` 为整数、导致 v20 连接时报“无效遥测”的问题。
+
+2026-11-06 的 15 kHz 构建验证（历史）：前端 **305 项测试**及 Release 构建通过，当时程序通过真实 COM7 原生界面 **4/4** 验收，接收 **39 次**状态回复并验证断开重连。配置、校准和校准质量保持一致，最终停机、无故障、串口释放。记录见 [15 kHz 验证汇总](.local/knob-svpwm-v20/validation-summary.json)。
+
+采样跳过、反馈恢复、PWM 延后及满占空比计数显示在诊断区，短暂无效窗口不会被界面误判为停机故障。运行电流按设备能力限制，最高 4.5 A；原模式 0–3 的强度最高 1000，参考模式使用与原档位一致的物理增益，各自的力度、阻尼、端点阻尼与倍率独立，最终受运行电流上限及保护约束。名义母线配置不覆盖实测母线。验证与使用说明见 [SmartKnob 接入指南](docs/smartknob-integration.md)。
+
+2026-11-05 v8 上位机验证（历史）：`npm run check:frontend` 通过，包括 Biome、TypeScript、24 个测试文件共 **295 项测试**及生产前端构建；Rust 旋钮单元测试 **3 项通过、1 项硬件测试按默认规则忽略**；原生 release 构建通过。基于 v8 实机状态样本的浏览器模拟验收 **8/8** 通过，覆盖自动电压随母线更新、配置不发送电压上限、采样波动显示及四种窗口宽度；模拟未连接硬件。[浏览器报告](.local/knob-svpwm-v8/browser-report.json)记录了当时的结果。历史程序大小为 15,142,912 字节，SHA-256 为 `FBCCA05CC8EC41D4304F2A0E35C02C992F5C9793C18CEA040C7B51455CCC2FC6`，当前桌面产物已更新。
+
+同一 release 程序通过真实 COM7 原生界面验收 **4/4**：读取 v8 自动电压与 0–100% PWM 能力，停机下经界面应用强度 **20→21→20**、模式 **1→0→1**，请求均不含旧电压字段；预设仍只改草稿。断开重连后配置及校准保持一致，最终恢复 **0.8 A / strength=20 / mode=1**，`idle / fault:none / duty=[0,0,0]`，连接已释放。最终快照母线约 **11.561 V**，自动电压能力约 **6.675 V**；没有发送 `enable` 或 `save`。详情见[原生实机验收报告](.local/knob-svpwm-v8/native-acceptance-report.json)。
+
+下面的 v5–v7 数字及可调电压记录属于历史验证。
+
+本次将强度编辑上限扩展至 **1000**，配套固件为 `dma-v7-strength-range`；按设备报告的 `strength_max` 协商，旧固件报告 100 时仍限制为 100，缺字段时回退为 10。运行电流上限仍最多 **4.5 A**，缺少能力字段时回退为 **0.8 A**。提高 strength 会增大弹力斜率、使目标更早到达限流值，不会绕过电流或电压限制，也不会自动提高设备参数。
+
+v6/v7 的 `smart_knob` 档位按中心死区与切换点估算静态峰值：`min(current_limit, strength × max(width × snap − min(width × 0.2, π/180), 0))`；旧 `localized_barrier` 仍按其旧曲线解释。旧版电压输入遵循有效采样窗口；当前电压能力只读。电流曲线自动调整量程，诊断按 MT6701 / AS5600 分别解释磁场状态，并显示分级过流与手感限制。本次前端参数测试 **40/40**、Rust 串口单元测试 **3/3**、固件桌面回归 **14/14**、TypeScript、Biome 与原生 release 构建均通过。新版程序已通过真实 COM7 验证：150/500/1000 可输入，1000.01 和 4.51 A 被拦截；停机下经界面应用 1000 并读回成功，随后完整恢复原配置和校准、断开连接。没有使能高强度输出或写 NVS。[新版桌面程序](src-tauri/target/release/wl1-studio.exe)；[原生界面验收](.local/knob-strength-1000/native-acceptance-report.json)。以下 v5 记录仅为历史。
+
+新增 `dma-v5-bus-sense` 兼容：修复新固件报告超过 5 V 的调制能力时连接失败的问题，按设备能力校验电压输入，并分别显示实测母线、名义配置、实时可用电压与当前有效限压。连接不会提高电压或改写设备参数；20 kHz 候选的额定电流和声音效果仍以固件实机验证为准。
+
+默认 `host_lease_ms=0` 时，断开工作台、返回产品库或关闭上位机只释放串口，设备继续运行；“停止力反馈”是明确的独立操作。重新连接只读取设备现状。正数租约构建则按其固件超时规则停机。上电仍为 idle，保存配置不会改变上电行为。参数、版本基线、连接行为和诊断说明见 [SmartKnob 接入指南](docs/smartknob-integration.md)。
+
 ## ESP32-C3 像素桌宠
 
 从产品库的 **ESP32-C3 像素桌宠** 卡片点击 **进入桌宠工作台**，选择 USB 串口并连接设备。
@@ -162,6 +194,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 │   ├── architecture.md          # 分层、状态与版本策略
 │   ├── firmware-integration.md  # WL1 固件与传输接入约定
 │   ├── gamebox-integration.md   # GameBox 只读串口、固件检查与外存规划
+│   ├── smartknob-integration.md # SmartKnob v21 分模式参数、无摩擦与独立 USB 会话
 │   ├── linux.md                 # Ubuntu 24.04 开发、运行与打包
 │   ├── release.md               # 跨平台发布、签名与门禁
 │   ├── security-audit.md        # 安全审计和残余风险
@@ -188,6 +221,7 @@ deb 与 AppImage 输出到 `src-tauri/target/release/bundle/`。电子琴交互�
 - [固件接入](docs/firmware-integration.md)
 - [WL1 参数保存到 Flash](docs/parameter-flash-save.md)
 - [GameBox 游戏机接入](docs/gamebox-integration.md)
+- [SmartKnob 智能力反馈旋钮接入](docs/smartknob-integration.md)
 - [PN532 NFC 门卡备份与写入](docs/nfc-pn532.md)
 - [Ubuntu 24.04 指南](docs/linux.md)
 - [开发指南](docs/development.md)

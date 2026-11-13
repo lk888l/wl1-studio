@@ -3606,6 +3606,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial-windows"
+version = "0.1.0"
+dependencies = [
+ "serialport",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "serialize-to-javascript"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5512,6 +5520,7 @@ dependencies = [
  "probe-rs",
  "serde",
  "serde_json",
+ "serial-windows",
  "serialport",
  "sha2",
  "sysinfo",

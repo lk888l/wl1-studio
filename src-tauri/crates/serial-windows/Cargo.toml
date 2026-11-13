@@ -1,0 +1,10 @@
+[package]
+name = "serial-windows"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Safe Windows serial queue configuration for desktop USB clients"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+serialport = { version = "4", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Devices_Communication"] }

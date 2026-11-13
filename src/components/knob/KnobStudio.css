@@ -24,6 +24,19 @@
 .knob-metrics small { display: block; font-size: 11px; opacity: .6; margin-bottom: 7px; }
 .knob-metrics strong { font-size: 23px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .knob-metrics em { font-size: 10px; font-style: normal; margin-left: 5px; opacity: .6; }
+.knob-power { margin-top: 18px; padding: 14px 16px; border: 1px solid #71868a25; border-radius: 14px; background: #738b9608; }
+.knob-power-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.knob-power-heading h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.knob-power-state { border-radius: 14px; padding: 4px 8px; font-size: 10px; background: #79888b18; }
+.knob-power-state.is-valid { color: #18755e; background: #51b99420; }
+.knob-power-state.is-invalid { color: #a1372d; background: #b3413610; }
+.knob-power-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.knob-power-values small, .knob-power-values span { display: block; font-size: 10px; opacity: .65; line-height: 1.5; }
+.knob-power-values strong { display: block; margin: 5px 0; font-size: 21px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.knob-power-values em { font-size: 10px; font-style: normal; margin-left: 4px; opacity: .65; }
+.knob-power .knob-caption { margin: 12px 0 0; }
+.knob-power .knob-validation { margin-bottom: 0; line-height: 1.7; }
+.knob-power .knob-validation button { display: block; margin-top: 8px; font-size: 11px; }
 .knob-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 12px; }
 .knob-actions button { flex: 1; white-space: nowrap; justify-content: center; font-size: 12px; }
 .knob-caption { font-size: 12px; opacity: .67; line-height: 1.7; }
@@ -53,7 +66,10 @@
 .knob-diagnostics { margin-top: 24px; padding: 12px 16px; border-radius: 12px; background: #738b9610; }
 .knob-diagnostics dl { margin: 0; font-size: 11px; }
 .knob-diagnostics dl > div { display: flex; gap: 10px; justify-content: space-between; padding: 6px 0; }
-.knob-diagnostics dt { opacity: .65; }.knob-diagnostics dd { margin: 0; font-variant-numeric: tabular-nums; }
+.knob-diagnostics dt { opacity: .65; }.knob-diagnostics dd { margin: 0; min-width: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.knob-runtime { border-top: 1px solid #71868a25; margin-top: 12px; padding-top: 12px; }
+.knob-runtime summary { cursor: pointer; font-size: 12px; }
+.knob-runtime dl { margin-top: 8px; }
 .knob-message { border-radius: 12px; padding: 12px 18px; background: #319b8415; margin: 10px 0; font-size: 13px; }
 .knob-message.is-error { background: #b3413610; color: #a1372d; }
 .knob-message button { float: right; border: 0; border-radius: 5px; background: #fff9; padding: 2px 8px; color: inherit; }
@@ -62,5 +78,27 @@
 .knob-studio button:focus-visible, .knob-studio input:focus-visible, .knob-studio select:focus-visible { outline: 2px solid #319b84; outline-offset: 3px; }
 @media (max-width: 1050px) { .knob-layout { grid-template-columns: 1fr; }.knob-connection { flex-wrap: wrap; }.knob-connection > span { width: 100%; }.knob-dial { max-width: 300px; } }
 @media (max-width: 600px) { .knob-studio { padding: 12px; }.knob-header { flex-wrap: wrap; padding: 12px; gap: 12px; }.knob-state { margin-left: 0; }.knob-live, .knob-settings { padding: 18px; }.knob-apply { flex-wrap: wrap; }.knob-apply > span { flex-basis: 100%; } }
+@media (max-width: 380px) { .knob-power-values { grid-template-columns: 1fr; }.knob-power-values > div { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 10px; }.knob-power-values span { grid-column: 1 / -1; } }
 
 .knob-hardware-error { max-width: 75%; overflow-wrap: anywhere; text-align: right; }
+.knob-mode-picker { display: flex; flex-direction: column; gap: 8px; margin: 22px 0 12px; font-size: 12px; }
+.knob-mode-picker select { width: 100%; min-width: 0; }
+.knob-ownership { padding: 12px 16px; border-radius: 12px; background: #319b840c; opacity: .85; }
+.knob-reference-note { border-left: 3px solid #319b8470; padding: 8px 12px; background: #319b8408; }
+.knob-frictionless, .knob-hold { margin-top: 18px; padding-top: 16px; border-top: 1px solid #71868a25; }
+.knob-frictionless h3, .knob-hold h3 { font-size: 13px; margin: 0 0 10px; }
+.knob-hold dl { font-size: 12px; margin: 0; }
+.knob-hold dl > div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.knob-hold dt { opacity: .7; }
+.knob-hold dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.knob-apply { flex-wrap: wrap; }
+.knob-apply > span { flex-basis: 100%; }
+.knob-reference-editor { margin-top: 18px; padding-top: 16px; border-top: 1px solid #71868a25; }
+.knob-reference-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.knob-reference-heading h3 { margin: 0; font-size: 13px; }
+.knob-reference-heading button { font-size: 11px; }
+.knob-reference-bounded { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0; font-size: 12px; }
+.knob-reference-bounded input { width: 16px; height: 16px; accent-color: #319b84; }
+.knob-reference-bounded span { font-size: 11px; opacity: .65; }
+.knob-magnetic-list { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; font-size: 12px; }
+.knob-magnetic-list input { width: 100%; padding: 9px 10px; border: 1px solid #84939840; border-radius: 9px; color: inherit; background: #ffffff60; font: inherit; font-variant-numeric: tabular-nums; }

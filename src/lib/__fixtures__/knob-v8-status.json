@@ -1,0 +1,263 @@
+{
+  "id": 779,
+  "device": "smartknob-s3",
+  "protocol": 1,
+  "firmware": "dma-v8-full-svpwm",
+  "pwm_profile": "20k100_svpwm",
+  "app_elf_sha256": "fef96a6576ee0048d2550a1aadb7bb763dc330dc8ca386c80ffcec33f7e9e69f",
+  "current_sampling": "pwm_staggered_adc_gdma_experimental",
+  "current_phase_skew_us": 49,
+  "adc_sample_valid": true,
+  "sampling_restart_required": false,
+  "adc_completed_mask": 7,
+  "adc_window_after_mask": 7,
+  "adc_trigger_elapsed_us": [
+    0,
+    49,
+    100
+  ],
+  "adc_pwm_compare_before": [
+    [
+      2000,
+      2000,
+      2000
+    ],
+    [
+      2000,
+      2000,
+      2000
+    ],
+    [
+      2000,
+      2000,
+      2000
+    ]
+  ],
+  "adc_pwm_compare_after": [
+    [
+      2000,
+      2000,
+      2000
+    ],
+    [
+      2000,
+      2000,
+      2000
+    ],
+    [
+      2000,
+      2000,
+      2000
+    ]
+  ],
+  "control_nominal_hz": 5000,
+  "encoder_nominal_hz": 2500,
+  "pwm_hz": 20000,
+  "pwm_half_period_ticks": 2000,
+  "pwm_resolution_hz": 80000000,
+  "pwm_duty_floor": 0,
+  "pwm_min_active_duty": 0,
+  "pwm_zero_clamp": true,
+  "pwm_duty_ceiling": 1,
+  "voltage_limit_automatic": true,
+  "max_voltage_limit": 6.668396949768066,
+  "available_voltage_limit": 6.668396949768066,
+  "configured_max_voltage_limit": 11.200594902038574,
+  "effective_voltage_limit": 6.668396949768066,
+  "bus_voltage_sensing": true,
+  "bus_voltage_source": "adc2_gpio11",
+  "bus_voltage": 11.550002098083496,
+  "bus_voltage_valid": true,
+  "bus_voltage_age_us": 4367,
+  "bus_voltage_raw": 1214,
+  "bus_voltage_adc_mv": 1050,
+  "bus_voltage_measured": 11.550002098083496,
+  "bus_voltage_error": 0,
+  "bus_voltage_divider": 11.000000953674316,
+  "detent_profile": "smart_knob",
+  "detent_quiet_velocity": false,
+  "haptic_position_filter": false,
+  "current_target_slew": false,
+  "host_lease_ms": 0,
+  "current_feedforward_ohms": 0,
+  "reset_reason": 11,
+  "uptime_ms": 242221,
+  "minimum_free_heap": 113472,
+  "current_limit_max": 4.5,
+  "strength_max": 1000,
+  "current_absolute_trip": 6,
+  "current_peak_trip": 5,
+  "current_peak_trip_ms": 1,
+  "current_overload_trip_ms": 20,
+  "current_trip_recovery_ratio": 4,
+  "current_trip_limit": 1,
+  "current_target_limit": 0,
+  "current_limited": false,
+  "quiet_output": false,
+  "haptic_scale": 0,
+  "speed_limited": false,
+  "haptic_paused": false,
+  "haptic_fade_start": 25,
+  "haptic_speed_cutoff": 40,
+  "haptic_resume_speed": 5,
+  "haptic_resume_hold_ms": 30,
+  "haptic_fade_in_ms": 500,
+  "detent_assist_fade_start": 10,
+  "detent_assist_cutoff": 25,
+  "elastic_min_damping": 0.03999999910593033,
+  "fault_current_valid": false,
+  "fault_current_trip_limit": 0,
+  "fault_currents": [
+    0,
+    0,
+    0
+  ],
+  "transport": "usb_serial_jtag",
+  "encoder": "MT6701",
+  "encoder_interface": "ssi_spi_dma",
+  "encoder_resolution_bits": 14,
+  "encoder_dma": true,
+  "weak_magnet_allowed": false,
+  "ok": true,
+  "state": "idle",
+  "fault": "none",
+  "diagnostic": {
+    "busy": false,
+    "cancelled": false,
+    "stage": 7,
+    "count": 2048,
+    "peak_speed": 0.35449501872062683,
+    "peak_current": 0.3522976040840149,
+    "muted_samples": 0,
+    "recovered": false
+  },
+  "hardware_detail": "none",
+  "hardware_error": 0,
+  "encoder_error": 0,
+  "fault_magnet": 0,
+  "encoder_failures": 0,
+  "encoder_retries": 0,
+  "voltage_d": 0,
+  "voltage_q": 0,
+  "angle": 3.0890538692474365,
+  "velocity": 5.227730401347053e-11,
+  "velocity_fast": 1.401298464324817e-45,
+  "position": 0,
+  "sub_position": 0.0065911328420043,
+  "iq": -0.0024488111957907677,
+  "id_current": -0.009892149828374386,
+  "target": 0,
+  "magnet": 0,
+  "current_valid": false,
+  "rejected_samples": 62900,
+  "reused_samples": 0,
+  "missed_samples": 0,
+  "timing_skips": 62900,
+  "sampling_recoveries": 0,
+  "pwm_deferred": 0,
+  "pwm_peak_duty": 0.387000024318695,
+  "pwm_full_duty_cycles": 0,
+  "control_cycles": 1147728,
+  "control_hz": 3425.999755859375,
+  "control_interval_us": 200,
+  "control_max_us": 51,
+  "encoder_age_us": 65,
+  "encoder_age_max_us": 425,
+  "adc_dma_words": [
+    28671,
+    36863
+  ],
+  "adc_slot_words": [
+    36863,
+    28671,
+    36863
+  ],
+  "adc_trigger_ticks": [
+    -103,
+    -99,
+    -108
+  ],
+  "adc_callback_ticks": [
+    543,
+    586,
+    558
+  ],
+  "adc_trigger_sar": [
+    0,
+    0,
+    0
+  ],
+  "adc_callback_sar": [
+    0,
+    0,
+    0
+  ],
+  "adc_callback_elapsed_us": [
+    10,
+    60,
+    110
+  ],
+  "adc_slot_mask": 7,
+  "adc_trigger_down_mask": 7,
+  "adc_callback_down_mask": 0,
+  "pwm_compare_before": [
+    2000,
+    2000,
+    2000
+  ],
+  "pwm_compare_after": [
+    2000,
+    2000,
+    2000
+  ],
+  "pwm_latch_sequence": 4842527,
+  "pwm_compare_valid": true,
+  "pwm_apply_delay_us": 0,
+  "sample_us": 110,
+  "loop_us": 16,
+  "encoder_us": 58,
+  "control_us": 2,
+  "sample_start_tick": -103,
+  "sample_end_tick": -108,
+  "currents": [
+    0.010159015655517578,
+    -0.004383723251521587,
+    -0.00577529240399599
+  ],
+  "sense_volts": [
+    1.6290000677108765,
+    1.630000114440918,
+    1.624000072479248
+  ],
+  "offsets": [
+    1.6274762153625488,
+    1.6282891035079956,
+    1.6248663663864136
+  ],
+  "duty": [
+    0,
+    0,
+    0
+  ],
+  "config": {
+    "bus_voltage": 19.399999618530273,
+    "sense_gain": 0.15000000596046448,
+    "current_limit": 0.800000011920929,
+    "current_kp": 3,
+    "current_ki": 60,
+    "width": 0.1745329201221466,
+    "strength": 20,
+    "endstop": 20,
+    "damping": 0.003000000026077032,
+    "snap": 0.550000011920929,
+    "mode": 1,
+    "min_position": 0,
+    "max_position": 11
+  },
+  "calibration": {
+    "valid": true,
+    "direction": 1,
+    "pole_pairs": 7,
+    "electrical_zero": 6.0791654586792
+  }
+}

@@ -22,7 +22,6 @@ import { RobotFeaturesPanel } from "./components/pages/RobotFeaturesPanel";
 import { TuningPage } from "./components/pages/TuningPage";
 import { PianoStudio } from "./components/piano/PianoStudio";
 import { KnobStudio } from "./components/knob/KnobStudio";
-import { knobGateway } from "./lib/knob";
 import { PetStudio } from "./components/pet/PetStudio";
 import { PcMonitorStatus } from "./components/pet/PcMonitorPanel";
 import { GameBoxStudio } from "./components/gamebox/GameBoxStudio";
@@ -189,7 +188,6 @@ export default function App() {
       .then(() => nfcGateway.initialize())
       .then(() => sticks3Gateway.initialize())
       .then(() => petGateway.initialize())
-      .then(() => knobGateway.initialize())
       .then(() => {
         if (!cancelled) setCatalogSafety("ready");
       })
