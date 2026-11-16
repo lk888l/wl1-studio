@@ -108,7 +108,7 @@ export function knobModeOptions(sample: KnobTelemetry | null): { value: number; 
 }
 export const maxKnobCurrent = 4.5;
 export const maxKnobStrength = 1000;
-export type KnobOp = "status" | "configure" | "calibrate" | "enable" | "disable" | "clear" | "zero" | "pulse" | "save";
+export type KnobOp = "status" | "configure" | "calibrate" | "enable" | "disable" | "clear" | "zero" | "pulse" | "save" | "wheel_enable" | "wheel_disable";
 export type KnobState = "idle" | "offsets" | "align" | "sweep" | "settle" | "active" | "fault";
 export interface KnobFaultSample {
   interval_us: number; age_us: number; start_tick: number; end_tick: number; duration_us: number; valid: boolean;
@@ -124,6 +124,7 @@ export interface KnobTelemetry {
   mode_count?: number; modes?: string[]; mode_name?: string; reference_preset?: number;
   reference_config_version?: number; reference_current_limit?: number; reference_defaults?: KnobReferenceModes;
   live_haptics_config?: boolean;
+  usb_wheel?: { supported: boolean; enabled: boolean; mounted: boolean; suspended: boolean; ready: boolean; steps_per_turn: number; reports: number; steps: number };
   frictionless?: KnobFrictionlessTelemetry;
   calibration_quality?: KnobCalibrationQuality; calibration_report?: KnobCalibrationReport;
   control_nominal_hz?: number; encoder_nominal_hz?: number; pwm_hz?: number; pwm_actual_hz?: number;
@@ -138,7 +139,7 @@ export interface KnobTelemetry {
   adc_sample_valid?: boolean; sampling_restart_required?: boolean; current_phase_skew_us?: number;
   host_lease_ms?: number; current_feedforward_ohms?: number;
   reset_reason?: number; uptime_ms?: number; minimum_free_heap?: number;
-  transport?: "usb_serial_jtag" | "uart0";
+  transport?: "usb_serial_jtag" | "usb_otg_cdc" | "uart0";
   encoder?: string; encoder_interface?: string; encoder_resolution_bits?: number; encoder_dma?: boolean;
   current_limit_max?: number; current_trip_limit?: number; current_absolute_trip?: number; current_target_limit?: number; current_limited?: boolean;
   strength_max?: number; current_peak_trip?: number; current_peak_trip_ms?: number; current_overload_trip_ms?: number; current_trip_recovery_ratio?: number;
@@ -479,7 +480,17 @@ export function parseKnobTelemetry(value: unknown): KnobTelemetry {
   const r = value as Record<string, unknown>;
   // Firmware cannot provide a real snapshot if its control task is unavailable.
   if (r.ok === false && r.error === "control_unavailable") throw new Error("旋钮控制任务不可用，请复位设备后重试");
-  if (r.transport !== undefined && !["usb_serial_jtag", "uart0"].includes(String(r.transport))) throw new Error("未知旋钮调参通道");
+  if (r.transport !== undefined && !["usb_serial_jtag", "usb_otg_cdc", "uart0"].includes(String(r.transport))) throw new Error("未知旋钮调参通道");
+  if (r.usb_wheel !== undefined) {
+    if (!r.usb_wheel || typeof r.usb_wheel !== "object" || Array.isArray(r.usb_wheel)) throw new Error("无效遥测：usb_wheel");
+    const wheel = r.usb_wheel as Record<string, unknown>;
+    for (const key of ["supported", "enabled", "mounted", "suspended", "ready"]) {
+      if (typeof wheel[key] !== "boolean") throw new Error(`无效遥测：usb_wheel.${key}`);
+    }
+    for (const key of ["steps_per_turn", "reports", "steps"]) {
+      if (typeof wheel[key] !== "number" || !Number.isInteger(wheel[key]) || (wheel[key] as number) < (key === "steps_per_turn" ? 1 : 0) || (wheel[key] as number) > 0xffffffff) throw new Error(`无效遥测：usb_wheel.${key}`);
+    }
+  }
   validateOptionalKnobTelemetry(r);
   if (r.device !== "smartknob-s3" || r.protocol !== 1 || typeof r.ok !== "boolean" ||
       !["idle", "offsets", "align", "sweep", "settle", "active", "fault"].includes(String(r.state)) || typeof r.fault !== "string") throw new Error("旋钮协议版本或设备身份不匹配");
@@ -601,10 +612,11 @@ export function knobConfigureRequestError(config: KnobConfig, sample: KnobTeleme
   catch (error) { return error instanceof Error ? error.message : String(error); }
 }
 export function sortKnobPorts(ports: SerialPortOption[]): SerialPortOption[] {
-  const rank = (p: SerialPortOption) => p.vid === 0x303a && p.pid === 0x1001 ? 0 : p.portType === "usb" ? 1 : 2;
+  const rank = (p: SerialPortOption) => p.vid === 0x303a && (p.pid === 0x1001 || p.pid === 0x4005) ? 0 : p.portType === "usb" ? 1 : 2;
   return [...ports].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 export function knobPortLabel(port: SerialPortOption): string {
+  if (port.vid === 0x303a && port.pid === 0x4005) return "SmartKnob USB OTG · 滚轮 + 调参";
   return port.vid === 0x303a && port.pid === 0x1001 ? "ESP32 原生 USB" : port.product ?? port.manufacturer ?? port.portType;
 }
 interface Session { connected: boolean; sessionId: number | null; portName: string | null }
@@ -656,6 +668,7 @@ export class KnobGateway {
     const requestedConfig = config ? structuredClone(config) : undefined;
     const run = async (): Promise<KnobTelemetry> => {
       if (id === null || this.sessionId !== id) throw new Error("旋钮尚未连接或会话已改变");
+      if ((op === "wheel_enable" || op === "wheel_disable") && !this.lastTelemetry?.usb_wheel?.supported) throw new Error("当前固件不支持 USB 滚轮，请升级固件后重连");
       let request: { op: KnobOp; config?: KnobConfig; reference_defaults?: boolean } = { op };
       if (op === "configure") {
         if (!requestedConfig) throw new Error("缺少旋钮参数");

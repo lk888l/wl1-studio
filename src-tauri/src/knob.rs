@@ -53,6 +53,8 @@ fn valid_request(request: &Value) -> bool {
                     | "zero"
                     | "pulse"
                     | "save"
+                    | "wheel_enable"
+                    | "wheel_disable"
             )
         )
         && request.to_string().len() <= 1900
@@ -353,6 +355,19 @@ mod tests {
             mock,
         )
     }
+    #[test]
+    fn wheel_switch_only_sends_device_operations() {
+        let (mut session, mock) = mock_session(7);
+        for op in ["wheel_enable", "wheel_disable"] {
+            let reply = session.request(json!({"op": op})).unwrap();
+            assert_eq!(reply["state"], "active");
+        }
+        let state = mock.lock().unwrap();
+        assert_eq!(state.requests.len(), 2);
+        assert_eq!(state.requests[0], json!({"op":"wheel_enable", "id":1}));
+        assert_eq!(state.requests[1], json!({"op":"wheel_disable", "id":2}));
+    }
+
     #[test]
     fn attach_observes_active_motor_and_detach_only_releases_port() {
         let (session, mock) = mock_session(7);

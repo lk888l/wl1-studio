@@ -51,6 +51,18 @@ function Dial({ angle, position, name, width, connected, snapshot }: { angle: nu
     </svg>
   </div>;
 }
+export function KnobWheelControl({ status, connected, busy, onToggle }: {
+  status: KnobTelemetry | null; connected: boolean; busy: boolean; onToggle: () => void;
+}) {
+  const wheel = status?.usb_wheel;
+  const enabled = connected && wheel?.enabled === true;
+  const supported = connected && wheel?.supported === true;
+  return <section className="knob-power" aria-label="USB 鼠标滚轮">
+    <div className="knob-power-heading"><h3>USB 鼠标滚轮</h3><button type="button" role="switch" aria-label="USB 鼠标滚轮" aria-checked={enabled} className={enabled ? "primary-button" : "secondary-button"} disabled={!supported || busy} onClick={onToggle}>{enabled ? "关闭滚轮" : "开启滚轮"}</button></div>
+    <p className="knob-caption">{!connected ? "连接设备后可开启滚轮。" : !supported ? "当前固件不支持 USB 滚轮，请升级固件后重连。" : enabled ? wheel.suspended ? "滚轮已开启，电脑休眠期间暂停输出。" : wheel.ready ? `滚轮已开启 · 每圈 ${wheel.steps_per_turn} 个刻度` : "滚轮已开启，等待 USB 和编码器就绪。" : "滚轮已关闭。"} 旋转计算由设备完成，开启后可关闭上位机。开关不改变手感参数；设备重启后默认关闭。</p>
+  </section>;
+}
+
 export function KnobVoltageReadout({ status }: { status: KnobTelemetry | null }) {
   const sensing = status?.bus_voltage_sensing === true;
   const automatic = status?.voltage_limit_automatic === true;
@@ -289,6 +301,7 @@ export function KnobStudio({ onBack }: { onBack: () => void }) {
           <p className="knob-caption">{!connected ? "连接后显示固件的自动电压能力与 PWM 范围。" : status?.voltage_limit_automatic ? busSensing ? "SVPWM 随实时母线自动使用最大可用电压，名义配置仅作参考，无需设置电压上限。" : "输出电压自动取母线最大可用值；没有实时采样时，请按实测值填写名义母线。" : busSensing ? "实时母线用于电压调制；旧固件保留已保存的电压上限，此处只读显示。" : "没有实时采样时，请将外部测得的母线电压填入名义配置。"}</p>
           {driveUnavailable && <p className="knob-validation">{samplingNeedsRestart ? "电流采样需要重新初始化；停机后清除故障，再重新启动。" : "母线采样当前不可用，暂时不能校准或启动力反馈。"}{samplingNeedsRestart && status?.state === "idle" && <button type="button" className="secondary-button" disabled={busy} onClick={() => { void command("clear"); }}>重新初始化采样</button>}</p>}
         </section>
+        <KnobWheelControl status={status} connected={connected} busy={busy || preparing} onToggle={() => { void command(status?.usb_wheel?.enabled ? "wheel_disable" : "wheel_enable"); }} />
         <div className="knob-actions">
           <button type="button" className="secondary-button" disabled={!connected || busy || dirty || driveUnavailable || status?.state !== "idle" || status.fault !== "none"} onClick={() => { void command("calibrate"); }}><RotateCcw size={16} />自动校准</button>
           <button type="button" className="primary-button" disabled={busy || (!connected && !port) || (connected && status?.state !== "idle")} onClick={() => { void command("enable"); }}><Zap size={16} />{connected ? "一键启动" : "一键连接并启动"}</button>
@@ -340,7 +353,7 @@ export function KnobStudio({ onBack }: { onBack: () => void }) {
         <p className="knob-caption">实时调整更新设备 RAM。停机后保存可在断电后保留；一键启动新完成的校准会自动保存一次，上电仍等待启动。</p>
         <div className="knob-diagnostics"><h3>设备诊断</h3><dl>
           {connected && status?.firmware && <div><dt>固件版本</dt><dd>{status.firmware}</dd></div>}
-          {connected && status?.transport && <div><dt>调参通道</dt><dd>{status.transport === "usb_serial_jtag" ? "原生 USB Serial/JTAG" : "COM / UART0"}</dd></div>}
+          {connected && status?.transport && <div><dt>调参通道</dt><dd>{status.transport === "usb_otg_cdc" ? "原生 USB OTG · CDC + HID" : status.transport === "usb_serial_jtag" ? "原生 USB Serial/JTAG" : "COM / UART0"}</dd></div>}
           {connected && status?.encoder && <div><dt>编码器</dt><dd>{status.encoder}{status.encoder_resolution_bits !== undefined ? ` · ${status.encoder_resolution_bits} 位` : ""}{status.encoder_interface === "ssi_spi_dma" ? " · SSI" : status.encoder_interface === "i2c" ? " · I²C" : ""}{status.encoder_dma ? " · DMA" : ""}</dd></div>}
           {connected && status && <div><dt>母线电压来源</dt><dd>{busSource}</dd></div>}
           {busSensing && status && <div><dt>母线采样状态</dt><dd>{busState}{status.bus_voltage_error ? ` · 错误 0x${status.bus_voltage_error.toString(16)}` : ""}</dd></div>}

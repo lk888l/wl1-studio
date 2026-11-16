@@ -46,7 +46,7 @@ export function acknowledgeKnobEditor(editor: KnobEditor, sent: KnobConfig, actu
 const electricalFrom = (c: KnobConfig): ElectricalDraft => Object.fromEntries(electricalKeys.map(key => [key, c[key]])) as ElectricalDraft;
 export function selectKnobPort(ports: SerialPortOption[], selected = ""): string {
   if (ports.some(port => port.name === selected)) return selected;
-  const candidates = ports.filter(port => port.vid === 0x303a && port.pid === 0x1001);
+  const candidates = ports.filter(port => port.vid === 0x303a && (port.pid === 0x1001 || port.pid === 0x4005));
   return candidates.length === 1 ? candidates[0]!.name : "";
 }
 export interface KnobWorkflowGateway {
