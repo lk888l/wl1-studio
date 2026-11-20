@@ -34,7 +34,7 @@ interface ProductHomeProps {
   safetyState: "checking" | "ready" | "error";
   pianoPreviewEnabled: boolean;
   safetyError: string | null;
-  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | "knob" | null;
+  launching: "wl1" | "piano" | "gamebox" | "nfc" | "sticks3" | "pet" | "knob" | "motor" | null;
   personalization: PersonalizationSettings;
   personalizationPersisted: boolean;
   onPersonalizationChange: (settings: PersonalizationSettings) => void;
@@ -46,6 +46,7 @@ interface ProductHomeProps {
   onOpenStickS3: () => void;
   onOpenPet: () => void;
   onOpenKnob: () => void;
+  onOpenMotor: () => void;
 }
 
 export function ProductHome({
@@ -64,6 +65,7 @@ export function ProductHome({
   onOpenStickS3,
   onOpenPet,
   onOpenKnob,
+  onOpenMotor,
 }: ProductHomeProps) {
   const [showPersonalization, setShowPersonalization] = useState(false);
   const safetyLabel = safetyState === "checking"
@@ -138,10 +140,16 @@ export function ProductHome({
             <div>
               <h2 id="available-products-title">已接入产品</h2>
             </div>
-            <span>6 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
+            <span>7 个设备工作台{pianoPreviewEnabled ? " · 1 个交互预览" : ""}</span>
           </div>
 
           <div className="product-catalog__layout">
+            <LiquidGlass as="button" variant="panel" type="button" className={`product-card product-card--motor glass-card liquid-card is-${safetyState}${launching === "motor" ? " is-launching" : ""}`} disabled={safetyState !== "ready" || Boolean(launching)} onClick={onOpenMotor}>
+              <span className="product-card__visual" aria-hidden="true"><span className="product-card__model">FOC / G431</span>
+                <svg viewBox="0 0 520 300" aria-hidden="true" fill="none"><ellipse cx="260" cy="254" rx="126" ry="13" fill="#23585b" opacity=".13"/><circle cx="260" cy="148" r="94" fill="#204b50"/><circle cx="260" cy="148" r="77" stroke="#81aaa5" strokeWidth="14"/>{Array.from({length:12},(_,index)=><path key={index} d="M250 82q10-8 20 0l-4 22h-12Z" fill="#f0aa69" transform={`rotate(${index*30} 260 148)`}/>)}<circle cx="260" cy="148" r="36" fill="#d1ded7"/><circle cx="260" cy="148" r="15" fill="#34595b"/><path d="M351 149h56m-4-9 12 9-12 9" stroke="#427b76" strokeWidth="3"/></svg>
+              </span>
+              <span className="product-card__body"><span className="product-card__meta"><span className="product-available"><i/>USB-CAN FD</span></span><span className="product-card__title"><strong>G431 无刷电机</strong></span><span className="product-card__description">通过 gs_usb 监视电机、周期驱动、配置对象字典与 PDO 映射。</span><span className="product-card__features"><span><Activity size={15}/>实时反馈</span><span><SlidersHorizontal size={15}/>参数与校准</span></span><span className="product-card__action"><strong>进入电机驱动台</strong><ArrowRight size={21}/></span></span>
+            </LiquidGlass>
             <LiquidGlass as="button" variant="panel" className={`product-card glass-card liquid-card is-${safetyState}${launching === "knob" ? " is-launching" : ""}`} type="button" disabled={safetyState !== "ready" || Boolean(launching)} onClick={onOpenKnob}>
               <span className="product-card__visual" aria-hidden="true"><span className="product-card__model">ESP32-S3 · HAPTIC CONTROL</span>
                 <svg viewBox="0 0 520 300" aria-hidden="true"><ellipse cx="260" cy="259" rx="112" ry="15" fill="#264d4b" opacity=".12" /><circle cx="260" cy="150" r="112" fill="#d4e2df" stroke="#fff" strokeWidth="3" /><circle cx="260" cy="150" r="93" fill="#273e47" /><circle cx="260" cy="150" r="83" fill="none" stroke="#4c666e" /><path d="M260 74v18" stroke="#9ce8d4" strokeWidth="6" strokeLinecap="round" /><text x="260" y="169" textAnchor="middle" fill="#eef4f5" fontSize="46">12</text><text x="260" y="193" textAnchor="middle" fill="#a8c0cd" fontSize="10" letterSpacing="3">SMART KNOB</text></svg>

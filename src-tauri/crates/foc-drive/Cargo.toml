@@ -1,0 +1,16 @@
+[package]
+name = "foc-drive"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "PDO master for the STM32G431 FOC CAN-FD firmware"
+
+[dependencies]
+anyhow = "1"
+can-transport = { version = "0.1.4", features = ["gs_usb"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "time", "macros", "sync"] }
+
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { version = "1", features = ["signal", "test-util"] }

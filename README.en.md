@@ -9,6 +9,8 @@ This repository implements an extensible, multi-product desktop control applicat
 
 ## Current scope
 
+The **G431 brushless motor** workspace uses a gs_usb USB-CAN FD hub. It attaches without enabling output, drives the axis with cyclic PDOs, and exposes the firmware dictionary, PDO mapping, calibration, telemetry recording and explicit Flash operations. See the [G431 integration guide](docs/g431-motor.md) and the standalone [Rust PDO master example](src-tauri/crates/foc-drive/examples/pdo_velocity.rs).
+
 The **StickS3** workspace shares its existing Flash interface between USB and Wi-Fi probes,
 with device and SWD/JTAG selectors. Add a wireless device by IPv4 lookup or LAN discovery;
 successful identity verification opens the workspace and selects that probe. Keep W-DAP open

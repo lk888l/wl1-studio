@@ -183,6 +183,14 @@ async fn complete(app: AppHandle, action: CloseAction) -> Result<(), String> {
         CloseAction::Quit => {
             app.state::<crate::firmware::FirmwareState>()
                 .ensure_idle()?;
+            let handle = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let lifecycle = handle.state::<crate::commands::ProductSessionLifecycle>();
+                let _guard = lock(&lifecycle.0);
+                handle.state::<crate::foc::MotorHost>().disconnect()
+            })
+            .await
+            .map_err(|error| format!("无法确认电机连接已释放：{error}"))??;
             super::ui_process::quit_now(&app);
             Ok(())
         }

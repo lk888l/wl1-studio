@@ -8,6 +8,7 @@ mod firmware;
 mod firmware_image;
 mod firmware_target;
 mod firmware_usb;
+mod foc;
 mod gamebox;
 mod knob;
 mod mifare;
@@ -67,6 +68,7 @@ pub fn run() {
         .manage(gamebox::GameBoxState::default())
         .manage(deskpet::PetState::default())
         .manage(knob::KnobState::default())
+        .manage(foc::MotorHost::default())
         .manage(pc_monitor::PcMonitorState::default())
         .manage(nfc::NfcState::default())
         .manage(sticks3::StickS3State::default())
@@ -103,6 +105,12 @@ pub fn run() {
             firmware_usb::firmware_usb_support,
             firmware_usb::firmware_install_usb_support,
             commands::list_serial_ports,
+            foc::foc_connect,
+            foc::foc_listen,
+            foc::foc_snapshot,
+            foc::foc_action,
+            foc::foc_stop,
+            foc::foc_release,
             knob::knob_connect,
             knob::knob_disconnect,
             knob::knob_request,
